@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>資金通帳</title>
+<meta name="theme-color" content="#1A1D21">
+<meta name="description" content="キャッシュフローを月次で管理するPWAアプリ">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="資金通帳">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<style>
+  :root{
+    --ink:#1A1D21; --bg:#FBFBF9; --line:#E7E6E1; --mut:#8A8F98;
+    --in:#0E7C66; --out:#C43A31;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Sans","Yu Gothic","Noto Sans JP",system-ui,sans-serif;
+    font-feature-settings:"tnum";
+  }
+  .app{max-width:560px;margin:0 auto;min-height:100vh;padding-bottom:60px}
+  header{display:flex;justify-content:space-between;align-items:flex-start;padding:24px 20px 12px}
+  .eyebrow{font-size:11px;letter-spacing:.25em;color:var(--mut);margin-bottom:10px}
+  .bal-label{font-size:12px;color:var(--mut)}
+  .balance{font-size:32px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .balance.neg{color:var(--out)}
+  #saveTag{font-size:11px;color:var(--mut);padding-top:4px;min-height:16px}
+  nav{display:flex;gap:6px;padding:8px 20px 14px;border-bottom:1px solid var(--line);
+      position:sticky;top:0;background:var(--bg);z-index:5}
+  nav button{flex:1;padding:9px 0;font-size:13px;border-radius:8px;border:1px solid var(--line);
+      background:#fff;color:#5A5F68;cursor:pointer}
+  nav button.active{background:var(--ink);color:#fff;border-color:var(--ink);font-weight:700}
+  main{padding-bottom:20px}
+  .month{padding:14px 20px 4px}
+  .month-head{display:flex;justify-content:space-between;align-items:baseline;
+      padding-bottom:8px;border-bottom:2px solid var(--ink);font-size:14px}
+  .month-head b{font-weight:700}
+  .now-badge{margin-left:8px;font-size:10px;font-weight:700;color:#fff;background:var(--ink);
+      border-radius:4px;padding:2px 6px;vertical-align:middle}
+  .sums{display:flex;gap:12px;font-size:12px;font-variant-numeric:tabular-nums}
+  .sums .i{color:var(--in)} .sums .o{color:var(--out)}
+  .empty{padding:14px 0;font-size:12px;color:#B0B3B8}
+  .row{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px dashed var(--line)}
+  .row.past{opacity:.55}
+  .r-left{flex:1;display:flex;align-items:baseline;gap:10px;min-width:0}
+  .r-date{font-size:12px;color:var(--mut);width:38px;flex-shrink:0;font-variant-numeric:tabular-nums}
+  .r-name{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fx-badge{margin-left:6px;font-size:10px;color:#4A5568;background:#EDEFF3;border-radius:4px;padding:1px 5px}
+  .r-right{display:flex;flex-direction:column;align-items:flex-end;flex-shrink:0}
+  .amt{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+  .amt.i{color:var(--in)} .amt.o{color:var(--out)}
+  .run{font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
+  .run.neg{color:var(--out)}
+  .del{border:none;background:transparent;color:#C0C3C8;font-size:16px;cursor:pointer;padding:0 4px}
+  .del:hover{color:var(--out)}
+  form,.pane{padding:20px;display:flex;flex-direction:column;gap:14px}
+  .type-switch{display:flex;gap:8px}
+  .type-switch button{flex:1;padding:10px 0;border-radius:8px;border:1px solid var(--line);
+      background:#fff;font-size:14px;cursor:pointer;color:#5A5F68}
+  .type-switch button.sel-in{background:var(--in);border-color:var(--in);color:#fff;font-weight:700}
+  .type-switch button.sel-out{background:var(--out);border-color:var(--out);color:#fff;font-weight:700}
+  label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#5A5F68}
+  input,select{padding:11px 12px;border-radius:8px;border:1px solid #D9D8D2;font-size:16px;background:#fff;color:var(--ink)}
+  .primary{margin-top:6px;padding:13px 0;border-radius:10px;border:none;background:var(--ink);
+      color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+  .danger{background:#fff;color:var(--out);border:1px solid var(--out)}
+  .hint{font-size:12px;color:var(--mut)}
+  .split{display:flex;gap:10px}
+  .split label:first-child{flex:1}
+  .split label:last-child{width:100px}
+  .hidden{display:none}
+  .io-row{display:flex;gap:8px}
+  .io-row button{flex:1;padding:10px 0;border-radius:8px;border:1px solid var(--line);background:#fff;
+      font-size:13px;cursor:pointer;color:#5A5F68}
+  @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+  /* PWA / Mobile enhancements */
+  *{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+  body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+  .app{padding-bottom:calc(60px + env(safe-area-inset-bottom))}
+  nav{padding-top:8px;padding-left:max(20px,env(safe-area-inset-left));padding-right:max(20px,env(safe-area-inset-right))}
+  input,select{font-size:16px} /* prevent iOS auto-zoom on focus */
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <div class="eyebrow">資金通帳</div>
+      <div class="bal-label" id="balLabel"></div>
+      <div class="balance" id="finalBal"></div>
+    </div>
+    <div id="saveTag"></div>
+  </header>
+
+  <nav>
+    <button data-tab="ledger" class="active">通帳</button>
+    <button data-tab="add">＋ 記帳</button>
+    <button data-tab="fixed">固定費</button>
+    <button data-tab="settings">設定</button>
+  </nav>
+
+  <main id="ledger"></main>
+
+  <form id="add" class="hidden" onsubmit="return false">
+    <div class="type-switch" id="addType">
+      <button type="button" data-v="in">入金</button>
+      <button type="button" data-v="out" class="sel-out">出金</button>
+    </div>
+    <label>日付 <input type="date" id="aDate"></label>
+    <label>内容 <input id="aName" placeholder="例: 家賃、カード引落、給与"></label>
+    <label>金額(円) <input id="aAmt" inputmode="numeric" placeholder="50000"></label>
+    <button class="primary" id="aSubmit">記帳する</button>
+  </form>
+
+  <div id="fixed" class="pane hidden">
+    <p class="hint">毎月自動で通帳に反映されます。</p>
+    <div id="fxList"></div>
+    <div class="type-switch" id="fxType">
+      <button type="button" data-v="in">入金</button>
+      <button type="button" data-v="out" class="sel-out">出金</button>
+    </div>
+    <label>内容 <input id="fName" placeholder="例: 家賃"></label>
+    <div class="split">
+      <label>金額(円) <input id="fAmt" inputmode="numeric" placeholder="80000"></label>
+      <label>毎月何日 <input id="fDay" inputmode="numeric" value="27"></label>
+    </div>
+    <button class="primary" id="fSubmit">固定費を追加</button>
+  </div>
+
+  <div id="settings" class="pane hidden">
+    <label>開始残高(円) <input id="sBal" inputmode="numeric"></label>
+    <label>先の表示月数
+      <select id="sAhead">
+        <option value="1">1ヶ月先まで</option>
+        <option value="2">2ヶ月先まで</option>
+        <option value="3" selected>3ヶ月先まで</option>
+        <option value="6">6ヶ月先まで</option>
+        <option value="12">12ヶ月先まで</option>
+      </select>
+    </label>
+    <div class="io-row">
+      <button id="btnExport">データ書き出し(JSON)</button>
+      <button id="btnImport">データ読み込み</button>
+      <input type="file" id="importFile" accept=".json" class="hidden">
+    </div>
+    <button class="primary danger" id="btnClear">全データを削除</button>
+    <p class="hint">データはこのブラウザ内(localStorage)に保存されます。別の端末・ブラウザに移すときは書き出し→読み込みを使ってください。</p>
+  </div>
+</div>
+
+<script>
+"use strict";
+const KEY = "cashflow-v1";
+const $  = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+const pad = (n) => String(n).padStart(2, "0");
+const yen = (n) => "¥" + Math.abs(Math.round(n)).toLocaleString("ja-JP");
+const uid = () => Math.random().toString(36).slice(2, 10);
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// ---------- state ----------
+let state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3 };
+let addTypeV = "out", fxTypeV = "out";
+
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) state = Object.assign(state, JSON.parse(raw));
+  } catch (e) {}
+}
+let saveTimer;
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    localStorage.setItem(KEY, JSON.stringify(state));
+    const t = $("#saveTag");
+    t.textContent = "保存済み";
+    setTimeout(() => t.textContent = "", 1500);
+  }, 300);
+}
+
+// ---------- ledger build ----------
+function buildLedger() {
+  const now = new Date();
+  let minM = new Date(now.getFullYear(), now.getMonth(), 1);
+  let maxM = new Date(now.getFullYear(), now.getMonth() + state.monthsAhead, 1);
+  for (const e of state.entries) {
+    const d = new Date(e.date + "T00:00:00");
+    const m = new Date(d.getFullYear(), d.getMonth(), 1);
+    if (m < minM) minM = m;
+    if (m > maxM) maxM = m;
+  }
+  const months = [];
+  const cur = new Date(minM);
+  while (cur <= maxM) { months.push(monthKey(cur)); cur.setMonth(cur.getMonth()+1); }
+
+  const rows = [];
+  for (const mk of months) {
+    const [y, m] = mk.split("-").map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    for (const fc of state.fixed) {
+      const day = Math.min(Number(fc.day) || 1, lastDay);
+      rows.push({ id: null, date: `${mk}-${pad(day)}`, type: fc.type, name: fc.name,
+                  amount: Number(fc.amount), isFixed: true });
+    }
+    for (const e of state.entries)
+      if (e.date.startsWith(mk)) rows.push({ ...e, isFixed: false });
+  }
+  rows.sort((a, b) => a.date === b.date ? (a.isFixed ? -1 : 1) : (a.date < b.date ? -1 : 1));
+
+  let bal = Number(state.startBalance) || 0;
+  const byMonth = new Map();
+  for (const r of rows) {
+    bal += r.type === "in" ? r.amount : -r.amount;
+    r.balance = bal;
+    const mk = r.date.slice(0, 7);
+    if (!byMonth.has(mk)) byMonth.set(mk, { rows: [], inSum: 0, outSum: 0 });
+    const g = byMonth.get(mk);
+    g.rows.push(r);
+    r.type === "in" ? g.inSum += r.amount : g.outSum += r.amount;
+  }
+  return { months, byMonth, finalBalance: bal };
+}
+
+// ---------- render ----------
+function render() {
+  const L = buildLedger();
+  const nowMk = monthKey(new Date());
+  const today = todayStr();
+
+  $("#balLabel").textContent = `${state.monthsAhead}ヶ月後の見込み残高`;
+  const fb = $("#finalBal");
+  fb.textContent = (L.finalBalance < 0 ? "−" : "") + yen(L.finalBalance);
+  fb.classList.toggle("neg", L.finalBalance < 0);
+
+  // ledger
+  let html = "";
+  for (const mk of L.months) {
+    const g = L.byMonth.get(mk);
+    const [y, m] = mk.split("-");
+    html += `<section class="month"><div class="month-head">
+      <b>${y}年${Number(m)}月${mk === nowMk ? '<span class="now-badge">今月</span>' : ""}</b>
+      <span class="sums"><span class="i">入 ${yen(g?.inSum||0)}</span><span class="o">出 ${yen(g?.outSum||0)}</span></span>
+    </div>`;
+    if (!g || !g.rows.length) html += `<div class="empty">記帳なし</div>`;
+    else for (const r of g.rows) {
+      html += `<div class="row${r.date < today ? " past" : ""}">
+        <div class="r-left"><span class="r-date">${Number(r.date.slice(8,10))}日</span>
+          <span class="r-name">${esc(r.name)}${r.isFixed ? '<span class="fx-badge">固定</span>' : ""}</span></div>
+        <div class="r-right">
+          <span class="amt ${r.type==="in"?"i":"o"}">${r.type==="in"?"+":"−"}${yen(r.amount)}</span>
+          <span class="run${r.balance<0?" neg":""}">残 ${r.balance<0?"−":""}${yen(r.balance)}</span></div>
+        ${r.isFixed ? "" : `<button class="del" data-del="${r.id}" aria-label="削除">×</button>`}
+      </div>`;
+    }
+    html += `</section>`;
+  }
+  $("#ledger").innerHTML = html;
+  $$("#ledger .del").forEach(b => b.onclick = () => {
+    state.entries = state.entries.filter(e => e.id !== b.dataset.del);
+    save(); render();
+  });
+
+  // fixed list
+  let fx = "";
+  for (const fc of state.fixed) {
+    fx += `<div class="row"><div class="r-left"><span class="r-name">毎月${fc.day}日 ・ ${esc(fc.name)}</span></div>
+      <span class="amt ${fc.type==="in"?"i":"o"}">${fc.type==="in"?"+":"−"}${yen(fc.amount)}</span>
+      <button class="del" data-fdel="${fc.id}" aria-label="削除">×</button></div>`;
+  }
+  $("#fxList").innerHTML = fx || '<div class="empty">固定費はまだありません</div>';
+  $$("#fxList .del").forEach(b => b.onclick = () => {
+    state.fixed = state.fixed.filter(f => f.id !== b.dataset.fdel);
+    save(); render();
+  });
+}
+
+// ---------- tabs ----------
+$$("nav button").forEach(b => b.onclick = () => {
+  $$("nav button").forEach(x => x.classList.remove("active"));
+  b.classList.add("active");
+  ["ledger","add","fixed","settings"].forEach(id =>
+    $("#"+id).classList.toggle("hidden", id !== b.dataset.tab));
+});
+
+// ---------- type switches ----------
+function bindSwitch(rootSel, setter) {
+  $$(rootSel + " button").forEach(b => b.onclick = () => {
+    setter(b.dataset.v);
+    $$(rootSel + " button").forEach(x => x.className = "");
+    b.className = b.dataset.v === "in" ? "sel-in" : "sel-out";
+  });
+}
+bindSwitch("#addType", v => addTypeV = v);
+bindSwitch("#fxType",  v => fxTypeV  = v);
+
+// ---------- add entry ----------
+$("#aDate").value = todayStr();
+$("#aSubmit").onclick = () => {
+  const name = $("#aName").value.trim();
+  const amt = Number($("#aAmt").value.replace(/[,，]/g, ""));
+  const date = $("#aDate").value;
+  if (!name || !amt || !date) return;
+  state.entries.push({ id: uid(), date, type: addTypeV, name, amount: amt });
+  $("#aName").value = ""; $("#aAmt").value = "";
+  save(); render();
+  $$("nav button")[0].click();
+};
+
+// ---------- add fixed ----------
+$("#fSubmit").onclick = () => {
+  const name = $("#fName").value.trim();
+  const amt = Number($("#fAmt").value.replace(/[,，]/g, ""));
+  const day = Math.min(Math.max(Number($("#fDay").value) || 1, 1), 31);
+  if (!name || !amt) return;
+  state.fixed.push({ id: uid(), name, amount: amt, day, type: fxTypeV });
+  $("#fName").value = ""; $("#fAmt").value = "";
+  save(); render();
+};
+
+// ---------- settings ----------
+$("#sBal").onchange = () => {
+  state.startBalance = Number($("#sBal").value.replace(/[,，]/g, "")) || 0;
+  save(); render();
+};
+$("#sAhead").onchange = () => {
+  state.monthsAhead = Number($("#sAhead").value);
+  save(); render();
+};
+$("#btnExport").onclick = () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `cashflow-${todayStr()}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+$("#btnImport").onclick = () => $("#importFile").click();
+$("#importFile").onchange = (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const d = JSON.parse(r.result);
+      if (!Array.isArray(d.entries)) throw new Error();
+      state = Object.assign({ startBalance:0, entries:[], fixed:[], monthsAhead:3 }, d);
+      $("#sBal").value = state.startBalance;
+      $("#sAhead").value = state.monthsAhead;
+      save(); render();
+      alert("読み込みました");
+    } catch { alert("読み込めないファイルです。書き出したJSONを選んでください。"); }
+  };
+  r.readAsText(file);
+  ev.target.value = "";
+};
+$("#btnClear").onclick = () => {
+  if (confirm("すべての記帳データを削除しますか?")) {
+    state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3 };
+    $("#sBal").value = 0;
+    save(); render();
+  }
+};
+
+// ---------- init ----------
+load();
+$("#sBal").value = state.startBalance;
+$("#sAhead").value = state.monthsAhead;
+render();
+
+// ---------- Service Worker ----------
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>

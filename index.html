@@ -104,8 +104,6 @@
   .row.prov-off{opacity:.45}
   .prov-badge{margin-left:6px;font-size:10px;color:#92400E;background:#FEF3C7;border-radius:4px;padding:1px 5px}
   .type-switch button.sel-prov{background:#D97706;border-color:#D97706;color:#fff;font-weight:700}
-  .sub-bal{font-size:11px;color:var(--mut);margin-top:4px;font-variant-numeric:tabular-nums;line-height:1.8}
-  .sub-bal span+span::before{content:"·";margin:0 6px;opacity:.4}
   .prov-hint{font-size:11px;color:#B45309;margin-left:8px}
   /* Category chips */
   .chip-row{display:flex;flex-wrap:wrap;gap:6px}
@@ -151,7 +149,6 @@
           <span>仮込</span>
         </label>
       </div>
-      <div class="sub-bal" id="subBal"></div>
     </div>
     <div id="saveTag"></div>
   </header>
@@ -416,15 +413,11 @@ function buildLedger() {
   rows.sort((a, b) => a.date === b.date ? (a.isFixed ? -1 : 1) : (a.date < b.date ? -1 : 1));
 
   let bal = Number(state.startBalance) || 0;
-  let balConf = Number(state.startBalance) || 0;
-  let balAll  = Number(state.startBalance) || 0;
   const byMonth = new Map();
   for (const r of rows) {
     const isProv = !!r.provisional;
     const counted = !isProv || state.includeProvisional;
     if (counted) bal += r.type === "in" ? r.amount : -r.amount;
-    if (!isProv) balConf += r.type === "in" ? r.amount : -r.amount;
-    balAll += r.type === "in" ? r.amount : -r.amount;
     r.balance = bal;
     r.counted = counted;
     const mk = r.date.slice(0, 7);
@@ -434,7 +427,7 @@ function buildLedger() {
     if (counted) r.type === "in" ? g.inSum += r.amount : g.outSum += r.amount;
     if (isProv) r.type === "in" ? g.provInSum += r.amount : g.provOutSum += r.amount;
   }
-  return { months, byMonth, finalBalance: bal, confirmedBalance: balConf, allBalance: balAll };
+  return { months, byMonth, finalBalance: bal };
 }
 
 // ---------- render ----------
@@ -447,7 +440,6 @@ function render() {
   const fb = $("#finalBal");
   fb.textContent = (L.finalBalance < 0 ? "−" : "") + yen(L.finalBalance);
   fb.classList.toggle("neg", L.finalBalance < 0);
-  $("#subBal").innerHTML = `<span>確定のみ ${L.confirmedBalance<0?"−":""}${yen(L.confirmedBalance)}</span><span>仮込み ${L.allBalance<0?"−":""}${yen(L.allBalance)}</span>`;
 
   // filter state → UI
   const isFiltered = filterProv !== "all" || filterCat !== null;

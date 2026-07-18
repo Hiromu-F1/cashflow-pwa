@@ -103,6 +103,9 @@
   .prov-toggle{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:var(--mut);cursor:pointer;user-select:none}
   .prov-toggle input[type=checkbox]{width:16px;height:16px;padding:0;border:none;background:none;accent-color:#D97706;flex-shrink:0}
   .type-switch button.sel-prov{background:#D97706;border-color:#D97706;color:#fff;font-weight:700}
+  .sub-bal{font-size:11px;color:var(--mut);margin-top:4px;font-variant-numeric:tabular-nums;line-height:1.8}
+  .sub-bal span+span::before{content:"·";margin:0 6px;opacity:.4}
+  .prov-hint{font-size:11px;color:#B45309;margin-left:8px}
 </style>
 </head>
 <body>
@@ -112,6 +115,7 @@
       <div class="eyebrow">資金通帳</div>
       <div class="bal-label" id="balLabel"></div>
       <div class="balance" id="finalBal"></div>
+      <div class="sub-bal" id="subBal"></div>
       <label class="prov-toggle">
         <input type="checkbox" id="toggleProv" checked>
         <span>仮置きを含める</span>
@@ -267,19 +271,25 @@ function buildLedger() {
   rows.sort((a, b) => a.date === b.date ? (a.isFixed ? -1 : 1) : (a.date < b.date ? -1 : 1));
 
   let bal = Number(state.startBalance) || 0;
+  let balConf = Number(state.startBalance) || 0;
+  let balAll  = Number(state.startBalance) || 0;
   const byMonth = new Map();
   for (const r of rows) {
-    const counted = !r.provisional || state.includeProvisional;
+    const isProv = !!r.provisional;
+    const counted = !isProv || state.includeProvisional;
     if (counted) bal += r.type === "in" ? r.amount : -r.amount;
+    if (!isProv) balConf += r.type === "in" ? r.amount : -r.amount;
+    balAll += r.type === "in" ? r.amount : -r.amount;
     r.balance = bal;
     r.counted = counted;
     const mk = r.date.slice(0, 7);
-    if (!byMonth.has(mk)) byMonth.set(mk, { rows: [], inSum: 0, outSum: 0 });
+    if (!byMonth.has(mk)) byMonth.set(mk, { rows: [], inSum: 0, outSum: 0, provInSum: 0, provOutSum: 0 });
     const g = byMonth.get(mk);
     g.rows.push(r);
     if (counted) r.type === "in" ? g.inSum += r.amount : g.outSum += r.amount;
+    if (isProv) r.type === "in" ? g.provInSum += r.amount : g.provOutSum += r.amount;
   }
-  return { months, byMonth, finalBalance: bal };
+  return { months, byMonth, finalBalance: bal, confirmedBalance: balConf, allBalance: balAll };
 }
 
 // ---------- render ----------
@@ -292,15 +302,18 @@ function render() {
   const fb = $("#finalBal");
   fb.textContent = (L.finalBalance < 0 ? "−" : "") + yen(L.finalBalance);
   fb.classList.toggle("neg", L.finalBalance < 0);
+  $("#subBal").innerHTML = `<span>確定のみ ${L.confirmedBalance<0?"−":""}${yen(L.confirmedBalance)}</span><span>仮込み ${L.allBalance<0?"−":""}${yen(L.allBalance)}</span>`;
 
   // ledger
   let html = "";
   for (const mk of L.months) {
     const g = L.byMonth.get(mk);
     const [y, m] = mk.split("-");
+    const pTotal = (g?.provInSum||0) + (g?.provOutSum||0);
+    const provHint = pTotal > 0 ? `<span class="prov-hint">(うち仮 ${yen(pTotal)})</span>` : "";
     html += `<section class="month"><div class="month-head">
       <b>${y}年${Number(m)}月${mk === nowMk ? '<span class="now-badge">今月</span>' : ""}</b>
-      <span class="sums"><span class="i">入 ${yen(g?.inSum||0)}</span><span class="o">出 ${yen(g?.outSum||0)}</span></span>
+      <span class="sums"><span class="i">入 ${yen(g?.inSum||0)}</span><span class="o">出 ${yen(g?.outSum||0)}</span>${provHint}</span>
     </div>`;
     if (!g || !g.rows.length) html += `<div class="empty">記帳なし</div>`;
     else for (const r of g.rows) {

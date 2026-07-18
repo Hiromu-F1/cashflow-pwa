@@ -125,6 +125,10 @@
   .filter-total-bar{padding:8px 20px;background:#FEF9EC;border-bottom:1px solid #F0D070;font-size:13px;font-variant-numeric:tabular-nums}
   .filter-total-bar span{font-weight:700}
   .chip.chip-cat.sel{background:#2D5F9E;border-color:#2D5F9E}
+  /* Edit mode */
+  .edit-banner{background:#FFF8E7;border-radius:8px;padding:10px 14px;font-size:13px;color:#92400E;border:1px solid #F0C040;font-weight:600}
+  .submit-row{display:flex;gap:10px}
+  .submit-row .primary{flex:1;margin-top:0}
   /* Update banner */
   .update-banner{position:fixed;bottom:calc(60px + env(safe-area-inset-bottom));left:0;right:0;
     max-width:560px;margin:0 auto;background:var(--ink);color:#fff;
@@ -178,6 +182,9 @@
   <main id="ledger"></main>
 
   <form id="add" class="hidden" onsubmit="return false">
+    <div id="editBanner" class="edit-banner hidden">
+      ✏️ <span id="editBannerText"></span>
+    </div>
     <div class="type-switch" id="addType">
       <button type="button" data-v="in">入金</button>
       <button type="button" data-v="out" class="sel-out">出金</button>
@@ -193,7 +200,10 @@
       <div class="cat-section-title">カテゴリ</div>
       <div class="chip-row" id="aCatChips"></div>
     </div>
-    <button class="primary" id="aSubmit">記帳する</button>
+    <div class="submit-row">
+      <button class="primary" id="aSubmit">記帳する</button>
+      <button type="button" class="primary hidden" id="aCancelEdit" style="background:#8A8F98">キャンセル</button>
+    </div>
   </form>
 
   <div id="fixed" class="pane hidden">
@@ -527,12 +537,15 @@ function switchTab(id) {
   if (editingId) {
     editingId = null;
     $("#aSubmit").textContent = "記帳する";
+    $("#editBanner").classList.add("hidden");
+    $("#aCancelEdit").classList.add("hidden");
     addTypeV = "out";
     $$("#addType button").forEach(x => x.className = "");
     [...$$("#addType button")].find(b => b.dataset.v === "out").className = "sel-out";
     addProvisional = false;
     $$("#provType button").forEach(x => x.className = "");
     [...$$("#provType button")].find(b => b.dataset.v === "false").className = "sel-in";
+    addCategoryV = "その他";
     $("#aDate").value = todayStr();
     $("#aName").value = ""; $("#aAmt").value = "";
   }
@@ -633,8 +646,14 @@ function startEdit(entry) {
     addProvisional ? "sel-prov" : "sel-in";
   addCategoryV = entry.category || "その他";
   renderCatChips("aCatChips", addCategoryV, v => addCategoryV = v);
-  $("#aSubmit").textContent = "更新する";
+  $("#editBannerText").textContent = `編集中: ${entry.name}`;
+  $("#editBanner").classList.remove("hidden");
+  $("#aCancelEdit").classList.remove("hidden");
+  $("#aSubmit").textContent = "上書き保存";
 }
+
+// ---------- edit cancel ----------
+$("#aCancelEdit").onclick = () => switchTab("ledger");
 
 // ---------- add entry ----------
 $("#aDate").value = todayStr();
@@ -648,6 +667,8 @@ $("#aSubmit").onclick = () => {
     if (idx !== -1) state.entries[idx] = { ...state.entries[idx], date, type: addTypeV, name, amount: amt, provisional: addProvisional, category: addCategoryV };
     editingId = null;
     $("#aSubmit").textContent = "記帳する";
+    $("#editBanner").classList.add("hidden");
+    $("#aCancelEdit").classList.add("hidden");
   } else {
     state.entries.push({ id: uid(), date, type: addTypeV, name, amount: amt, provisional: addProvisional, category: addCategoryV });
   }

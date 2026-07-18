@@ -182,7 +182,7 @@
       <button type="button" data-v="out" class="sel-out">出金</button>
     </div>
     <label>日付 <input type="date" id="aDate"></label>
-    <label>内容 <input id="aName" placeholder="例: 家賃、カード引落、給与"></label>
+    <label>コメント(任意) <input id="aName" placeholder="例: 家賃、カード引落、給与"></label>
     <label>金額(円) <input id="aAmt" inputmode="numeric" placeholder="50000"></label>
     <div class="type-switch" id="provType">
       <button type="button" data-v="false" class="sel-in">確定</button>
@@ -205,7 +205,7 @@
       <button type="button" data-v="in">入金</button>
       <button type="button" data-v="out" class="sel-out">出金</button>
     </div>
-    <label>内容 <input id="fName" placeholder="例: 家賃"></label>
+    <label>コメント(任意) <input id="fName" placeholder="例: 家賃"></label>
     <div class="split">
       <label>金額(円) <input id="fAmt" inputmode="numeric" placeholder="80000"></label>
       <label>毎月何日 <input id="fDay" inputmode="numeric" value="27"></label>
@@ -305,11 +305,23 @@ let addTypeV = "out", fxTypeV = "out", addProvisional = false;
 let addCategoryV = "その他", fxCategoryV = "その他";
 let editingId = null;
 
+// 旧 name フィールドを comment に統一するマイグレーション
+function migrateArr(arr) {
+  return arr.map(e => {
+    if (e.comment === undefined && e.name !== undefined) {
+      const { name, ...rest } = e;
+      return { ...rest, comment: name };
+    }
+    return e;
+  });
+}
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) state = Object.assign(state, JSON.parse(raw));
     if (!Array.isArray(state.categories) || state.categories.length === 0) state.categories = [...DEFAULT_CATS];
+    state.entries = migrateArr(state.entries);
+    state.fixed   = migrateArr(state.fixed);
   } catch (e) {}
 }
 let saveTimer;
@@ -322,6 +334,9 @@ function save() {
     setTimeout(() => t.textContent = "", 1500);
   }, 300);
 }
+
+// コメントがあればコメント、なければカテゴリ名を表示名とする
+const dname = (r) => r.comment || r.category || "その他";
 
 // ---------- category chips ----------
 function renderCatChips(containerId, currentVal, setter) {
@@ -409,7 +424,8 @@ function buildLedger() {
     const lastDay = new Date(y, m, 0).getDate();
     for (const fc of state.fixed) {
       const day = Math.min(Number(fc.day) || 1, lastDay);
-      rows.push({ id: null, date: `${mk}-${pad(day)}`, type: fc.type, name: fc.name,
+      rows.push({ id: null, date: `${mk}-${pad(day)}`, type: fc.type,
+                  comment: fc.comment, category: fc.category,
                   amount: Number(fc.amount), isFixed: true });
     }
     for (const e of state.entries)
@@ -493,9 +509,11 @@ function render() {
     else for (const r of visRows) {
       const rc = [r.date < today?"past":"", r.provisional?"prov":"", r.provisional&&!r.counted?"prov-off":""].filter(Boolean).join(" ");
       const balHtml = isFiltered ? "" : `<span class="run${r.balance<0?" neg":""}">残 ${r.balance<0?"−":""}${yen(r.balance)}</span>`;
+      // コメントがある場合のみカテゴリバッジを表示（コメント無しのときは表示名=カテゴリなので重複を避ける）
+      const catBadge = r.comment ? `<span class="cat-badge">${esc(r.category||"その他")}</span>` : "";
       html += `<div class="row${rc?" "+rc:""}"${r.isFixed ? "" : ` data-eid="${r.id}"`}>
         <div class="r-left"><span class="r-date">${Number(r.date.slice(8,10))}日</span>
-          <span class="r-name">${esc(r.name)}${r.isFixed ? '<span class="fx-badge">固定</span>' : ""}${r.provisional ? '<span class="prov-badge">仮</span>' : ""}<span class="cat-badge">${esc(r.category||"その他")}</span></span></div>
+          <span class="r-name">${esc(dname(r))}${r.isFixed ? '<span class="fx-badge">固定</span>' : ""}${r.provisional ? '<span class="prov-badge">仮</span>' : ""}${catBadge}</span></div>
         <div class="r-right">
           <span class="amt ${r.type==="in"?"i":"o"}">${r.type==="in"?"+":"−"}${yen(r.amount)}</span>
           ${balHtml}</div>
@@ -518,7 +536,7 @@ function render() {
   let fx = "";
   for (const fc of state.fixed) {
     fx += `<div class="row" data-fxid="${fc.id}">
-      <div class="r-left"><span class="r-name">毎月${fc.day}日 ・ ${esc(fc.name)}</span></div>
+      <div class="r-left"><span class="r-name">毎月${fc.day}日 ・ ${esc(dname(fc))}</span></div>
       <span class="amt ${fc.type==="in"?"i":"o"}">${fc.type==="in"?"+":"−"}${yen(fc.amount)}</span>
     </div>`;
   }
@@ -580,7 +598,7 @@ $$("#provType button").forEach(b => b.onclick = () => {
 // ---------- action sheet (fixed costs) ----------
 let editingFxId = null;
 function showFxSheet(fc) {
-  $("#fxSheetInfo").textContent = `毎月${fc.day}日 ・ ${fc.name}　${fc.type==="in"?"+":"−"}${yen(fc.amount)}`;
+  $("#fxSheetInfo").textContent = `毎月${fc.day}日 ・ ${dname(fc)}　${fc.type==="in"?"+":"−"}${yen(fc.amount)}`;
   $("#fxSheetEdit").onclick = () => { hideFxSheet(); startFxEdit(fc); };
   $("#fxSheetDel").onclick = () => {
     hideFxSheet();
@@ -598,7 +616,7 @@ function startFxEdit(fc) {
   $$("#fxType button").forEach(x => x.className = "");
   [...$$("#fxType button")].find(b => b.dataset.v === fc.type).className =
     fc.type === "in" ? "sel-in" : "sel-out";
-  $("#fName").value = fc.name;
+  $("#fName").value = fc.comment || "";
   $("#fAmt").value = fc.amount;
   $("#fDay").value = fc.day;
   fxCategoryV = fc.category || "その他";
@@ -609,7 +627,7 @@ function startFxEdit(fc) {
 
 // ---------- action sheet (ledger) ----------
 function showSheet(entry) {
-  $("#sheetInfo").textContent = `${entry.name}　${entry.type==="in"?"+":"−"}${yen(entry.amount)}`;
+  $("#sheetInfo").textContent = `${dname(entry)}　${entry.type==="in"?"+":"−"}${yen(entry.amount)}`;
   $("#sheetEdit").onclick = () => { hideSheet(); startEdit(entry); };
   const cb = $("#sheetConfirm");
   cb.classList.toggle("hidden", !entry.provisional);
@@ -636,7 +654,7 @@ function startEdit(entry) {
   [...$$("#addType button")].find(b => b.dataset.v === entry.type).className =
     entry.type === "in" ? "sel-in" : "sel-out";
   $("#aDate").value = entry.date;
-  $("#aName").value = entry.name;
+  $("#aName").value = entry.comment || "";
   $("#aAmt").value = entry.amount;
   addProvisional = !!entry.provisional;
   $$("#provType button").forEach(x => x.className = "");
@@ -655,18 +673,21 @@ $("#fxCancelEdit").onclick = () => switchTab("fixed");
 // ---------- add entry ----------
 $("#aDate").value = todayStr();
 $("#aSubmit").onclick = () => {
-  const name = $("#aName").value.trim();
-  const amt = Number($("#aAmt").value.replace(/[,，]/g, ""));
+  const comment = $("#aName").value.trim(); // 任意
+  const amt  = Number($("#aAmt").value.replace(/[,，]/g, ""));
   const date = $("#aDate").value;
-  if (!name || !amt || !date) return;
+  if (!amt || !date) return; // カテゴリは常に選択済み
   if (editingId) {
     const idx = state.entries.findIndex(e => e.id === editingId);
-    if (idx !== -1) state.entries[idx] = { ...state.entries[idx], date, type: addTypeV, name, amount: amt, provisional: addProvisional, category: addCategoryV };
+    if (idx !== -1) {
+      const { name, ...rest } = state.entries[idx]; // 旧 name フィールドを除去
+      state.entries[idx] = { ...rest, date, type: addTypeV, comment, amount: amt, provisional: addProvisional, category: addCategoryV };
+    }
     editingId = null;
     $("#aSubmit").textContent = "記帳する";
     $("#aCancelEdit").classList.add("hidden");
   } else {
-    state.entries.push({ id: uid(), date, type: addTypeV, name, amount: amt, provisional: addProvisional, category: addCategoryV });
+    state.entries.push({ id: uid(), date, type: addTypeV, comment, amount: amt, provisional: addProvisional, category: addCategoryV });
   }
   $("#aName").value = ""; $("#aAmt").value = "";
   save(); render();
@@ -675,18 +696,21 @@ $("#aSubmit").onclick = () => {
 
 // ---------- add fixed ----------
 $("#fSubmit").onclick = () => {
-  const name = $("#fName").value.trim();
+  const comment = $("#fName").value.trim(); // 任意
   const amt = Number($("#fAmt").value.replace(/[,，]/g, ""));
   const day = Math.min(Math.max(Number($("#fDay").value) || 1, 1), 31);
-  if (!name || !amt) return;
+  if (!amt) return; // カテゴリは常に選択済み
   if (editingFxId) {
     const idx = state.fixed.findIndex(f => f.id === editingFxId);
-    if (idx !== -1) state.fixed[idx] = { ...state.fixed[idx], name, amount: amt, day, type: fxTypeV, category: fxCategoryV };
+    if (idx !== -1) {
+      const { name, ...rest } = state.fixed[idx]; // 旧 name フィールドを除去
+      state.fixed[idx] = { ...rest, comment, amount: amt, day, type: fxTypeV, category: fxCategoryV };
+    }
     editingFxId = null;
     $("#fSubmit").textContent = "固定費を追加";
     $("#fxCancelEdit").classList.add("hidden");
   } else {
-    state.fixed.push({ id: uid(), name, amount: amt, day, type: fxTypeV, category: fxCategoryV });
+    state.fixed.push({ id: uid(), comment, amount: amt, day, type: fxTypeV, category: fxCategoryV });
   }
   $("#fName").value = ""; $("#fAmt").value = "";
   save(); render();
@@ -727,6 +751,8 @@ $("#importFile").onchange = (ev) => {
       if (!Array.isArray(d.entries)) throw new Error();
       state = Object.assign({ startBalance:0, entries:[], fixed:[], monthsAhead:3, includeProvisional:true, categories:[...DEFAULT_CATS] }, d);
       if (!Array.isArray(state.categories) || state.categories.length === 0) state.categories = [...DEFAULT_CATS];
+      state.entries = migrateArr(state.entries);
+      state.fixed   = migrateArr(state.fixed);
       $("#sBal").value = state.startBalance;
       $("#sAhead").value = state.monthsAhead;
       $("#toggleProv").checked = state.includeProvisional;

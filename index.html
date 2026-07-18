@@ -116,6 +116,11 @@
   .cat-section-title{font-size:12px;color:#5A5F68;margin-bottom:6px}
   .cat-add-row{display:flex;gap:8px;align-items:flex-end}
   .cat-add-row input{flex:1}
+  /* Filter bar */
+  .filter-bar{padding:10px 20px 8px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line);background:var(--bg)}
+  .filter-total-bar{padding:8px 20px;background:#FEF9EC;border-bottom:1px solid #F0D070;font-size:13px;font-variant-numeric:tabular-nums}
+  .filter-total-bar span{font-weight:700}
+  .chip.chip-cat.sel{background:#2D5F9E;border-color:#2D5F9E}
 </style>
 </head>
 <body>
@@ -141,6 +146,17 @@
     <button data-tab="settings">設定</button>
   </nav>
 
+  <div id="ledgerFilter">
+    <div class="filter-bar">
+      <div class="chip-row" id="filterProvChips">
+        <button class="chip sel" data-prov="all">すべて</button>
+        <button class="chip" data-prov="confirmed">確定</button>
+        <button class="chip" data-prov="provisional">仮</button>
+      </div>
+      <div class="chip-row" id="filterCatChips"></div>
+    </div>
+    <div id="filterTotalBar" class="filter-total-bar hidden"></div>
+  </div>
   <main id="ledger"></main>
 
   <form id="add" class="hidden" onsubmit="return false">
@@ -298,6 +314,31 @@ function renderCatManage() {
   });
 }
 
+// ---------- filter state (not persisted) ----------
+let filterProv = "all";   // "all" | "confirmed" | "provisional"
+let filterCat  = null;    // null | string
+
+function renderFilterCatChips() {
+  const el = $("#filterCatChips");
+  if (!el) return;
+  el.innerHTML = `<button class="chip chip-cat${filterCat===null?" sel":""}" data-fc="__all">すべて</button>` +
+    state.categories.map(c =>
+      `<button class="chip chip-cat${filterCat===c?" sel":""}" data-fc="${esc(c)}">${esc(c)}</button>`
+    ).join("");
+  el.querySelectorAll(".chip-cat").forEach(b => b.onclick = () => {
+    filterCat = b.dataset.fc === "__all" ? null : b.dataset.fc;
+    render();
+  });
+}
+function initFilterProvChips() {
+  $$("#filterProvChips .chip").forEach(b => b.onclick = () => {
+    filterProv = b.dataset.prov;
+    $$("#filterProvChips .chip").forEach(x => x.classList.remove("sel"));
+    b.classList.add("sel");
+    render();
+  });
+}
+
 // ---------- ledger build ----------
 function buildLedger() {
   const now = new Date();
@@ -361,26 +402,59 @@ function render() {
   fb.classList.toggle("neg", L.finalBalance < 0);
   $("#subBal").innerHTML = `<span>確定のみ ${L.confirmedBalance<0?"−":""}${yen(L.confirmedBalance)}</span><span>仮込み ${L.allBalance<0?"−":""}${yen(L.allBalance)}</span>`;
 
+  // filter state → UI
+  const isFiltered = filterProv !== "all" || filterCat !== null;
+  function rowMatchesFilter(r) {
+    const provOk = filterProv === "all" || (filterProv === "confirmed" && !r.provisional) || (filterProv === "provisional" && !!r.provisional);
+    const catOk  = filterCat === null || (r.category||"その他") === filterCat;
+    return provOk && catOk;
+  }
+  renderFilterCatChips();
+  $$("#filterProvChips .chip").forEach(b => {
+    b.classList.toggle("sel", b.dataset.prov === filterProv);
+  });
+
+  // filter total
+  let filterTotal = 0;
+  if (isFiltered) {
+    for (const mk of L.months) {
+      const g = L.byMonth.get(mk);
+      if (!g) continue;
+      for (const r of g.rows) if (rowMatchesFilter(r)) filterTotal += r.type === "in" ? r.amount : -r.amount;
+    }
+  }
+  const ftBar = $("#filterTotalBar");
+  if (isFiltered) {
+    ftBar.classList.remove("hidden");
+    ftBar.innerHTML = `フィルター結果の合計: <span>${filterTotal<0?"−":""}${yen(filterTotal)}</span>`;
+  } else {
+    ftBar.classList.add("hidden");
+  }
+
   // ledger
   let html = "";
   for (const mk of L.months) {
     const g = L.byMonth.get(mk);
     const [y, m] = mk.split("-");
+    const allRows = g?.rows || [];
+    const visRows = isFiltered ? allRows.filter(rowMatchesFilter) : allRows;
+    if (isFiltered && visRows.length === 0) continue;
     const pTotal = (g?.provInSum||0) + (g?.provOutSum||0);
     const provHint = pTotal > 0 ? `<span class="prov-hint">(うち仮 ${yen(pTotal)})</span>` : "";
     html += `<section class="month"><div class="month-head">
       <b>${y}年${Number(m)}月${mk === nowMk ? '<span class="now-badge">今月</span>' : ""}</b>
       <span class="sums"><span class="i">入 ${yen(g?.inSum||0)}</span><span class="o">出 ${yen(g?.outSum||0)}</span>${provHint}</span>
     </div>`;
-    if (!g || !g.rows.length) html += `<div class="empty">記帳なし</div>`;
-    else for (const r of g.rows) {
+    if (!visRows.length) html += `<div class="empty">記帳なし</div>`;
+    else for (const r of visRows) {
       const rc = [r.date < today?"past":"", r.provisional?"prov":"", r.provisional&&!r.counted?"prov-off":""].filter(Boolean).join(" ");
+      const balHtml = isFiltered ? "" : `<span class="run${r.balance<0?" neg":""}">残 ${r.balance<0?"−":""}${yen(r.balance)}</span>`;
       html += `<div class="row${rc?" "+rc:""}"${r.isFixed ? "" : ` data-eid="${r.id}"`}>
         <div class="r-left"><span class="r-date">${Number(r.date.slice(8,10))}日</span>
           <span class="r-name">${esc(r.name)}${r.isFixed ? '<span class="fx-badge">固定</span>' : ""}${r.provisional ? '<span class="prov-badge">仮</span>' : ""}<span class="cat-badge">${esc(r.category||"その他")}</span></span></div>
         <div class="r-right">
           <span class="amt ${r.type==="in"?"i":"o"}">${r.type==="in"?"+":"−"}${yen(r.amount)}</span>
-          <span class="run${r.balance<0?" neg":""}">残 ${r.balance<0?"−":""}${yen(r.balance)}</span></div>
+          ${balHtml}</div>
       </div>`;
     }
     html += `</section>`;
@@ -436,6 +510,7 @@ function switchTab(id) {
   $$("nav button").forEach(x => x.classList.toggle("active", x.dataset.tab === id));
   ["ledger","add","fixed","settings"].forEach(tab =>
     $("#"+tab).classList.toggle("hidden", tab !== id));
+  $("#ledgerFilter").classList.toggle("hidden", id !== "ledger");
 }
 $$("nav button").forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 
@@ -621,6 +696,7 @@ $("#sBal").value = state.startBalance;
 $("#sAhead").value = state.monthsAhead;
 $("#toggleProv").checked = state.includeProvisional;
 $("#toggleProv").onchange = () => { state.includeProvisional = $("#toggleProv").checked; save(); render(); };
+initFilterProvChips();
 render();
 
 // ---------- Service Worker ----------

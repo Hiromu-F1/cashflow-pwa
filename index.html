@@ -125,13 +125,6 @@
   .chip.chip-cat.sel{background:#2D5F9E;border-color:#2D5F9E}
   .submit-row{display:flex;gap:10px}
   .submit-row .primary{flex:1;margin-top:0}
-  /* Update banner */
-  .update-banner{position:fixed;bottom:calc(60px + env(safe-area-inset-bottom));left:0;right:0;
-    max-width:560px;margin:0 auto;background:var(--ink);color:#fff;
-    display:flex;align-items:center;justify-content:space-between;
-    padding:12px 16px;z-index:300;font-size:14px;box-shadow:0 -2px 12px rgba(0,0,0,.2)}
-  .update-banner button{padding:7px 16px;border-radius:8px;border:none;background:var(--in);
-    color:#fff;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -182,15 +175,15 @@
       <button type="button" data-v="out" class="sel-out">出金</button>
     </div>
     <label>日付 <input type="date" id="aDate"></label>
-    <label>コメント(任意) <input id="aName" placeholder="例: 家賃、カード引落、給与"></label>
-    <label>金額(円) <input id="aAmt" inputmode="numeric" placeholder="50000"></label>
-    <div class="type-switch" id="provType">
-      <button type="button" data-v="false" class="sel-in">確定</button>
-      <button type="button" data-v="true">仮</button>
-    </div>
     <div>
       <div class="cat-section-title">カテゴリ</div>
       <div class="chip-row" id="aCatChips"></div>
+    </div>
+    <label>金額(円) <input id="aAmt" inputmode="numeric" placeholder="50000"></label>
+    <label>コメント(任意) <input id="aName" placeholder="例: 家賃、カード引落、給与"></label>
+    <div class="type-switch" id="provType">
+      <button type="button" data-v="false" class="sel-in">確定</button>
+      <button type="button" data-v="true">仮</button>
     </div>
     <div class="submit-row">
       <button class="primary" id="aSubmit">記帳する</button>
@@ -205,15 +198,15 @@
       <button type="button" data-v="in">入金</button>
       <button type="button" data-v="out" class="sel-out">出金</button>
     </div>
-    <label>コメント(任意) <input id="fName" placeholder="例: 家賃"></label>
-    <div class="split">
-      <label>金額(円) <input id="fAmt" inputmode="numeric" placeholder="80000"></label>
-      <label>毎月何日 <input id="fDay" inputmode="numeric" value="27"></label>
-    </div>
     <div>
       <div class="cat-section-title">カテゴリ</div>
       <div class="chip-row" id="fxCatChips"></div>
     </div>
+    <div class="split">
+      <label>金額(円) <input id="fAmt" inputmode="numeric" placeholder="80000"></label>
+      <label>毎月何日 <input id="fDay" inputmode="numeric" value="27"></label>
+    </div>
+    <label>コメント(任意) <input id="fName" placeholder="例: 家賃"></label>
     <div class="submit-row">
       <button class="primary" id="fSubmit">固定費を追加</button>
       <button type="button" class="primary hidden" id="fxCancelEdit" style="background:#8A8F98">キャンセル</button>
@@ -265,12 +258,6 @@
       <button id="fxSheetDel" class="sheet-btn sheet-btn-danger">削除</button>
       <button class="sheet-btn sheet-btn-cancel" onclick="hideFxSheet()">キャンセル</button>
     </div>
-  </div>
-
-  <!-- Update banner -->
-  <div id="updateBanner" class="update-banner hidden">
-    <span>新しいバージョンがあります</span>
-    <button id="btnUpdateNow">更新</button>
   </div>
 
   <!-- Action Sheet (ledger entries) -->
@@ -786,68 +773,13 @@ render();
 
 // ---------- Service Worker ----------
 let swReg = null;
-// SKIP_WAITING を送信した後、controllerchange までの間に誤再表示しないためのフラグ
-let swUpdatePending = false;
-
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").then(reg => {
     swReg = reg;
-
-    function showUpdateBanner() {
-      // skipWaiting 済みならバナーを出さない
-      if (!swUpdatePending) $("#updateBanner").classList.remove("hidden");
-    }
-
-    // installing SW の state 変化を1回だけ追跡する
-    function trackInstalling(worker) {
-      if (!worker) return;
-      function onStateChange() {
-        if (worker.state === "installed") {
-          // 既存の controller がいる = 更新（初回インストールではない）
-          // reg.waiting を確認して実際に待機中かを検証
-          if (navigator.serviceWorker.controller && reg.waiting) showUpdateBanner();
-          worker.removeEventListener("statechange", onStateChange);
-        } else if (worker.state === "redundant") {
-          // インストール失敗 → listener を外す
-          worker.removeEventListener("statechange", onStateChange);
-        }
-      }
-      worker.addEventListener("statechange", onStateChange);
-    }
-
-    // ページロード時点で既に waiting な SW があれば即バナー表示
-    // (前回タブがバックグラウンドのまま SW が更新を終えていたケース)
-    if (reg.waiting && navigator.serviceWorker.controller) showUpdateBanner();
-
-    // installing 中の SW があればそれを追跡
-    if (reg.installing) trackInstalling(reg.installing);
-
-    // 新しい SW のダウンロードが始まったら追跡開始
-    // updatefound は同じ registration オブジェクトに対して1回しか登録しないため多重購読にならない
-    reg.addEventListener("updatefound", () => trackInstalling(reg.installing));
-
     // フォアグラウンドで長時間開いている場合の定期チェック (30 分おき)
     setInterval(() => reg.update(), 30 * 60 * 1000);
   }).catch(() => {});
-
-  // skipWaiting 後に新 SW が controller になったらリロード
-  let refreshing = false;
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (!refreshing) { refreshing = true; location.reload(); }
-  });
 }
-
-// 更新バナーの「更新」ボタン
-$("#btnUpdateNow").onclick = () => {
-  $("#updateBanner").classList.add("hidden"); // タップ直後に即非表示
-  swUpdatePending = true;                     // controllerchange までの間バナー再表示を防ぐ
-  if (swReg?.waiting) {
-    swReg.waiting.postMessage({ type: "SKIP_WAITING" });
-    // → SW が skipWaiting() → activate → controllerchange → location.reload()
-  } else {
-    location.reload(); // waiting がなければ直接リロード
-  }
-};
 
 // 設定タブの「アプリを更新」ボタン (手動キャッシュ破棄)
 $("#btnSWUpdate").onclick = async () => {

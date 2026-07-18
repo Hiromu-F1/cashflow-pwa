@@ -1,6 +1,6 @@
 // Service Worker for 資金通帳 PWA
 // ★ デプロイ時はこのバージョンを上げること (CLAUDE.md 参照)
-const CACHE = "cashflow-v5";
+const CACHE = "cashflow-v6";
 
 // プリキャッシュ対象 (cache-first で提供するアセット)
 const STATIC_ASSETS = [
@@ -10,25 +10,21 @@ const STATIC_ASSETS = [
   "./icons/icon.svg"
 ];
 
-// Install: 静的アセットをプリキャッシュ。skipWaiting しない→待機状態でバナーを表示させる
+// Install: 静的アセットをプリキャッシュし、即時アクティベート
 self.addEventListener("install", ev => {
   ev.waitUntil(
     caches.open(CACHE).then(c => c.addAll(STATIC_ASSETS))
   );
+  self.skipWaiting();
 });
 
-// Activate: 古いキャッシュを全削除
+// Activate: 古いキャッシュを全削除し、即時クライアントを制御
 self.addEventListener("activate", ev => {
   ev.waitUntil(
     caches.keys().then(keys =>
       Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
-});
-
-// skipWaiting メッセージを受信したら即時切り替え
-self.addEventListener("message", ev => {
-  if (ev.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 // Fetch: HTML は network-first、その他は cache-first

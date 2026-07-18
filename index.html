@@ -58,8 +58,8 @@
   .amt.i{color:var(--in)} .amt.o{color:var(--out)}
   .run{font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
   .run.neg{color:var(--out)}
-  .del{border:none;background:transparent;color:#C0C3C8;font-size:16px;cursor:pointer;padding:0 4px;min-width:32px;min-height:32px}
-  .del:hover{color:var(--out)}
+  .row[data-fxid]{cursor:pointer}
+  .row[data-fxid]:active{background:rgba(0,0,0,.04);border-radius:6px;margin:0 -4px;padding-left:4px;padding-right:4px}
   form,.pane{padding:20px;display:flex;flex-direction:column;gap:14px}
   .type-switch{display:flex;gap:8px}
   .type-switch button{flex:1;padding:10px 0;border-radius:8px;border:1px solid var(--line);
@@ -160,6 +160,17 @@
     </div>
     <button class="primary danger" id="btnClear">全データを削除</button>
     <p class="hint">データはこのブラウザ内(localStorage)に保存されます。別の端末・ブラウザに移すときは書き出し→読み込みを使ってください。</p>
+  </div>
+
+  <!-- Action Sheet (fixed costs) -->
+  <div id="fxSheet" class="sheet-overlay hidden">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-info" id="fxSheetInfo"></div>
+      <button id="fxSheetEdit" class="sheet-btn">編集</button>
+      <button id="fxSheetDel" class="sheet-btn sheet-btn-danger">削除</button>
+      <button class="sheet-btn sheet-btn-cancel" onclick="hideFxSheet()">キャンセル</button>
+    </div>
   </div>
 
   <!-- Action Sheet (ledger entries) -->
@@ -292,14 +303,15 @@ function render() {
   // fixed list
   let fx = "";
   for (const fc of state.fixed) {
-    fx += `<div class="row"><div class="r-left"><span class="r-name">毎月${fc.day}日 ・ ${esc(fc.name)}</span></div>
+    fx += `<div class="row" data-fxid="${fc.id}">
+      <div class="r-left"><span class="r-name">毎月${fc.day}日 ・ ${esc(fc.name)}</span></div>
       <span class="amt ${fc.type==="in"?"i":"o"}">${fc.type==="in"?"+":"−"}${yen(fc.amount)}</span>
-      <button class="del" data-fdel="${fc.id}" aria-label="削除">×</button></div>`;
+    </div>`;
   }
   $("#fxList").innerHTML = fx || '<div class="empty">固定費はまだありません</div>';
-  $$("#fxList .del").forEach(b => b.onclick = () => {
-    state.fixed = state.fixed.filter(f => f.id !== b.dataset.fdel);
-    save(); render();
+  $$("#fxList .row[data-fxid]").forEach(row => row.onclick = () => {
+    const fc = state.fixed.find(f => f.id === row.dataset.fxid);
+    if (fc) showFxSheet(fc);
   });
 }
 
@@ -313,6 +325,14 @@ function switchTab(id) {
     [...$$("#addType button")].find(b => b.dataset.v === "out").className = "sel-out";
     $("#aDate").value = todayStr();
     $("#aName").value = ""; $("#aAmt").value = "";
+  }
+  if (editingFxId) {
+    editingFxId = null;
+    $("#fSubmit").textContent = "固定費を追加";
+    fxTypeV = "out";
+    $$("#fxType button").forEach(x => x.className = "");
+    [...$$("#fxType button")].find(b => b.dataset.v === "out").className = "sel-out";
+    $("#fName").value = ""; $("#fAmt").value = ""; $("#fDay").value = "27";
   }
   $$("nav button").forEach(x => x.classList.toggle("active", x.dataset.tab === id));
   ["ledger","add","fixed","settings"].forEach(tab =>
@@ -330,6 +350,33 @@ function bindSwitch(rootSel, setter) {
 }
 bindSwitch("#addType", v => addTypeV = v);
 bindSwitch("#fxType",  v => fxTypeV  = v);
+
+// ---------- action sheet (fixed costs) ----------
+let editingFxId = null;
+function showFxSheet(fc) {
+  $("#fxSheetInfo").textContent = `毎月${fc.day}日 ・ ${fc.name}　${fc.type==="in"?"+":"−"}${yen(fc.amount)}`;
+  $("#fxSheetEdit").onclick = () => { hideFxSheet(); startFxEdit(fc); };
+  $("#fxSheetDel").onclick = () => {
+    hideFxSheet();
+    state.fixed = state.fixed.filter(f => f.id !== fc.id);
+    save(); render();
+  };
+  $("#fxSheet").onclick = ev => { if (ev.target === ev.currentTarget) hideFxSheet(); };
+  $("#fxSheet").classList.remove("hidden");
+}
+function hideFxSheet() { $("#fxSheet").classList.add("hidden"); }
+function startFxEdit(fc) {
+  switchTab("fixed");
+  editingFxId = fc.id;
+  fxTypeV = fc.type;
+  $$("#fxType button").forEach(x => x.className = "");
+  [...$$("#fxType button")].find(b => b.dataset.v === fc.type).className =
+    fc.type === "in" ? "sel-in" : "sel-out";
+  $("#fName").value = fc.name;
+  $("#fAmt").value = fc.amount;
+  $("#fDay").value = fc.day;
+  $("#fSubmit").textContent = "固定費を更新";
+}
 
 // ---------- action sheet (ledger) ----------
 function showSheet(entry) {
@@ -383,7 +430,14 @@ $("#fSubmit").onclick = () => {
   const amt = Number($("#fAmt").value.replace(/[,，]/g, ""));
   const day = Math.min(Math.max(Number($("#fDay").value) || 1, 1), 31);
   if (!name || !amt) return;
-  state.fixed.push({ id: uid(), name, amount: amt, day, type: fxTypeV });
+  if (editingFxId) {
+    const idx = state.fixed.findIndex(f => f.id === editingFxId);
+    if (idx !== -1) state.fixed[idx] = { ...state.fixed[idx], name, amount: amt, day, type: fxTypeV };
+    editingFxId = null;
+    $("#fSubmit").textContent = "固定費を追加";
+  } else {
+    state.fixed.push({ id: uid(), name, amount: amt, day, type: fxTypeV });
+  }
   $("#fName").value = ""; $("#fAmt").value = "";
   save(); render();
 };

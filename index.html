@@ -123,8 +123,6 @@
   .filter-total-bar{padding:8px 20px;background:#FEF9EC;border-bottom:1px solid #F0D070;font-size:13px;font-variant-numeric:tabular-nums}
   .filter-total-bar span{font-weight:700}
   .chip.chip-cat.sel{background:#2D5F9E;border-color:#2D5F9E}
-  /* Edit mode */
-  .edit-banner{background:#FFF8E7;border-radius:8px;padding:10px 14px;font-size:13px;color:#92400E;border:1px solid #F0C040;font-weight:600}
   .submit-row{display:flex;gap:10px}
   .submit-row .primary{flex:1;margin-top:0}
   /* Update banner */
@@ -179,9 +177,6 @@
   <main id="ledger"></main>
 
   <form id="add" class="hidden" onsubmit="return false">
-    <div id="editBanner" class="edit-banner hidden">
-      ✏️ <span id="editBannerText"></span>
-    </div>
     <div class="type-switch" id="addType">
       <button type="button" data-v="in">入金</button>
       <button type="button" data-v="out" class="sel-out">出金</button>
@@ -219,7 +214,10 @@
       <div class="cat-section-title">カテゴリ</div>
       <div class="chip-row" id="fxCatChips"></div>
     </div>
-    <button class="primary" id="fSubmit">固定費を追加</button>
+    <div class="submit-row">
+      <button class="primary" id="fSubmit">固定費を追加</button>
+      <button type="button" class="primary hidden" id="fxCancelEdit" style="background:#8A8F98">キャンセル</button>
+    </div>
   </div>
 
   <div id="settings" class="pane hidden">
@@ -536,7 +534,6 @@ function switchTab(id) {
   if (editingId) {
     editingId = null;
     $("#aSubmit").textContent = "記帳する";
-    $("#editBanner").classList.add("hidden");
     $("#aCancelEdit").classList.add("hidden");
     addTypeV = "out";
     $$("#addType button").forEach(x => x.className = "");
@@ -551,6 +548,7 @@ function switchTab(id) {
   if (editingFxId) {
     editingFxId = null;
     $("#fSubmit").textContent = "固定費を追加";
+    $("#fxCancelEdit").classList.add("hidden");
     fxTypeV = "out";
     $$("#fxType button").forEach(x => x.className = "");
     [...$$("#fxType button")].find(b => b.dataset.v === "out").className = "sel-out";
@@ -605,6 +603,7 @@ function startFxEdit(fc) {
   $("#fDay").value = fc.day;
   fxCategoryV = fc.category || "その他";
   renderCatChips("fxCatChips", fxCategoryV, v => fxCategoryV = v);
+  $("#fxCancelEdit").classList.remove("hidden");
   $("#fSubmit").textContent = "固定費を更新";
 }
 
@@ -645,14 +644,13 @@ function startEdit(entry) {
     addProvisional ? "sel-prov" : "sel-in";
   addCategoryV = entry.category || "その他";
   renderCatChips("aCatChips", addCategoryV, v => addCategoryV = v);
-  $("#editBannerText").textContent = `編集中: ${entry.name}`;
-  $("#editBanner").classList.remove("hidden");
   $("#aCancelEdit").classList.remove("hidden");
   $("#aSubmit").textContent = "上書き保存";
 }
 
 // ---------- edit cancel ----------
-$("#aCancelEdit").onclick = () => switchTab("ledger");
+$("#aCancelEdit").onclick  = () => switchTab("ledger");
+$("#fxCancelEdit").onclick = () => switchTab("fixed");
 
 // ---------- add entry ----------
 $("#aDate").value = todayStr();
@@ -666,7 +664,6 @@ $("#aSubmit").onclick = () => {
     if (idx !== -1) state.entries[idx] = { ...state.entries[idx], date, type: addTypeV, name, amount: amt, provisional: addProvisional, category: addCategoryV };
     editingId = null;
     $("#aSubmit").textContent = "記帳する";
-    $("#editBanner").classList.add("hidden");
     $("#aCancelEdit").classList.add("hidden");
   } else {
     state.entries.push({ id: uid(), date, type: addTypeV, name, amount: amt, provisional: addProvisional, category: addCategoryV });
@@ -687,6 +684,7 @@ $("#fSubmit").onclick = () => {
     if (idx !== -1) state.fixed[idx] = { ...state.fixed[idx], name, amount: amt, day, type: fxTypeV, category: fxCategoryV };
     editingFxId = null;
     $("#fSubmit").textContent = "固定費を追加";
+    $("#fxCancelEdit").classList.add("hidden");
   } else {
     state.fixed.push({ id: uid(), name, amount: amt, day, type: fxTypeV, category: fxCategoryV });
   }

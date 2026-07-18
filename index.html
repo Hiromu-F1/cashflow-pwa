@@ -106,6 +106,16 @@
   .sub-bal{font-size:11px;color:var(--mut);margin-top:4px;font-variant-numeric:tabular-nums;line-height:1.8}
   .sub-bal span+span::before{content:"·";margin:0 6px;opacity:.4}
   .prov-hint{font-size:11px;color:#B45309;margin-left:8px}
+  /* Category chips */
+  .chip-row{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{padding:5px 12px;border-radius:20px;border:1px solid var(--line);background:#fff;font-size:13px;cursor:pointer;color:#5A5F68;white-space:nowrap;line-height:1.4}
+  .chip.sel{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:600}
+  .chip-del{background:none;border:none;color:var(--mut);font-size:13px;padding:0 0 0 4px;cursor:pointer;line-height:1}
+  .chip-del:hover{color:var(--out)}
+  .cat-badge{margin-left:5px;font-size:10px;color:var(--mut);background:var(--line);border-radius:4px;padding:1px 5px;flex-shrink:0}
+  .cat-section-title{font-size:12px;color:#5A5F68;margin-bottom:6px}
+  .cat-add-row{display:flex;gap:8px;align-items:flex-end}
+  .cat-add-row input{flex:1}
 </style>
 </head>
 <body>
@@ -145,6 +155,10 @@
       <button type="button" data-v="false" class="sel-in">確定</button>
       <button type="button" data-v="true">仮</button>
     </div>
+    <div>
+      <div class="cat-section-title">カテゴリ</div>
+      <div class="chip-row" id="aCatChips"></div>
+    </div>
     <button class="primary" id="aSubmit">記帳する</button>
   </form>
 
@@ -160,6 +174,10 @@
       <label>金額(円) <input id="fAmt" inputmode="numeric" placeholder="80000"></label>
       <label>毎月何日 <input id="fDay" inputmode="numeric" value="27"></label>
     </div>
+    <div>
+      <div class="cat-section-title">カテゴリ</div>
+      <div class="chip-row" id="fxCatChips"></div>
+    </div>
     <button class="primary" id="fSubmit">固定費を追加</button>
   </div>
 
@@ -174,6 +192,14 @@
         <option value="12">12ヶ月先まで</option>
       </select>
     </label>
+    <div>
+      <div class="cat-section-title">カテゴリ管理</div>
+      <div class="chip-row" id="catManage" style="margin-bottom:10px"></div>
+      <div class="cat-add-row">
+        <input id="newCatInput" placeholder="新しいカテゴリ名">
+        <button class="primary" id="btnAddCat" style="padding:11px 16px;margin:0;flex-shrink:0">追加</button>
+      </div>
+    </div>
     <div class="io-row">
       <button id="btnExport">データ書き出し(JSON)</button>
       <button id="btnImport">データ読み込み</button>
@@ -220,14 +246,17 @@ const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 // ---------- state ----------
-let state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3, includeProvisional: true };
+const DEFAULT_CATS = ["旅行","食費","固定費","カード","収入","その他"];
+let state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3, includeProvisional: true, categories: [...DEFAULT_CATS] };
 let addTypeV = "out", fxTypeV = "out", addProvisional = false;
+let addCategoryV = "その他", fxCategoryV = "その他";
 let editingId = null;
 
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) state = Object.assign(state, JSON.parse(raw));
+    if (!Array.isArray(state.categories) || state.categories.length === 0) state.categories = [...DEFAULT_CATS];
   } catch (e) {}
 }
 let saveTimer;
@@ -239,6 +268,34 @@ function save() {
     t.textContent = "保存済み";
     setTimeout(() => t.textContent = "", 1500);
   }, 300);
+}
+
+// ---------- category chips ----------
+function renderCatChips(containerId, currentVal, setter) {
+  const el = $("#" + containerId);
+  if (!el) return;
+  el.innerHTML = state.categories.map(c =>
+    `<button type="button" class="chip${c === currentVal ? " sel" : ""}" data-cat="${esc(c)}">${esc(c)}</button>`
+  ).join("");
+  el.querySelectorAll(".chip").forEach(b => b.onclick = () => {
+    setter(b.dataset.cat);
+    el.querySelectorAll(".chip").forEach(x => x.classList.remove("sel"));
+    b.classList.add("sel");
+  });
+}
+function renderCatManage() {
+  const el = $("#catManage");
+  if (!el) return;
+  el.innerHTML = state.categories.map(c =>
+    `<span class="chip" style="display:inline-flex;align-items:center">${esc(c)}<button class="chip-del" data-cat="${esc(c)}" title="削除">×</button></span>`
+  ).join("");
+  el.querySelectorAll(".chip-del").forEach(b => b.onclick = () => {
+    if (state.categories.length <= 1) return;
+    state.categories = state.categories.filter(c => c !== b.dataset.cat);
+    if (addCategoryV === b.dataset.cat) addCategoryV = state.categories[state.categories.length - 1];
+    if (fxCategoryV === b.dataset.cat) fxCategoryV = state.categories[state.categories.length - 1];
+    save(); render();
+  });
 }
 
 // ---------- ledger build ----------
@@ -320,7 +377,7 @@ function render() {
       const rc = [r.date < today?"past":"", r.provisional?"prov":"", r.provisional&&!r.counted?"prov-off":""].filter(Boolean).join(" ");
       html += `<div class="row${rc?" "+rc:""}"${r.isFixed ? "" : ` data-eid="${r.id}"`}>
         <div class="r-left"><span class="r-date">${Number(r.date.slice(8,10))}日</span>
-          <span class="r-name">${esc(r.name)}${r.isFixed ? '<span class="fx-badge">固定</span>' : ""}${r.provisional ? '<span class="prov-badge">仮</span>' : ""}</span></div>
+          <span class="r-name">${esc(r.name)}${r.isFixed ? '<span class="fx-badge">固定</span>' : ""}${r.provisional ? '<span class="prov-badge">仮</span>' : ""}<span class="cat-badge">${esc(r.category||"その他")}</span></span></div>
         <div class="r-right">
           <span class="amt ${r.type==="in"?"i":"o"}">${r.type==="in"?"+":"−"}${yen(r.amount)}</span>
           <span class="run${r.balance<0?" neg":""}">残 ${r.balance<0?"−":""}${yen(r.balance)}</span></div>
@@ -333,6 +390,11 @@ function render() {
     const entry = state.entries.find(e => e.id === row.dataset.eid);
     if (entry) showSheet(entry);
   });
+
+  // category chips
+  renderCatChips("aCatChips", addCategoryV, v => addCategoryV = v);
+  renderCatChips("fxCatChips", fxCategoryV, v => fxCategoryV = v);
+  renderCatManage();
 
   // fixed list
   let fx = "";
@@ -417,6 +479,8 @@ function startFxEdit(fc) {
   $("#fName").value = fc.name;
   $("#fAmt").value = fc.amount;
   $("#fDay").value = fc.day;
+  fxCategoryV = fc.category || "その他";
+  renderCatChips("fxCatChips", fxCategoryV, v => fxCategoryV = v);
   $("#fSubmit").textContent = "固定費を更新";
 }
 
@@ -455,6 +519,8 @@ function startEdit(entry) {
   $$("#provType button").forEach(x => x.className = "");
   [...$$("#provType button")].find(b => b.dataset.v === String(addProvisional)).className =
     addProvisional ? "sel-prov" : "sel-in";
+  addCategoryV = entry.category || "その他";
+  renderCatChips("aCatChips", addCategoryV, v => addCategoryV = v);
   $("#aSubmit").textContent = "更新する";
 }
 
@@ -467,11 +533,11 @@ $("#aSubmit").onclick = () => {
   if (!name || !amt || !date) return;
   if (editingId) {
     const idx = state.entries.findIndex(e => e.id === editingId);
-    if (idx !== -1) state.entries[idx] = { ...state.entries[idx], date, type: addTypeV, name, amount: amt, provisional: addProvisional };
+    if (idx !== -1) state.entries[idx] = { ...state.entries[idx], date, type: addTypeV, name, amount: amt, provisional: addProvisional, category: addCategoryV };
     editingId = null;
     $("#aSubmit").textContent = "記帳する";
   } else {
-    state.entries.push({ id: uid(), date, type: addTypeV, name, amount: amt, provisional: addProvisional });
+    state.entries.push({ id: uid(), date, type: addTypeV, name, amount: amt, provisional: addProvisional, category: addCategoryV });
   }
   $("#aName").value = ""; $("#aAmt").value = "";
   save(); render();
@@ -486,11 +552,11 @@ $("#fSubmit").onclick = () => {
   if (!name || !amt) return;
   if (editingFxId) {
     const idx = state.fixed.findIndex(f => f.id === editingFxId);
-    if (idx !== -1) state.fixed[idx] = { ...state.fixed[idx], name, amount: amt, day, type: fxTypeV };
+    if (idx !== -1) state.fixed[idx] = { ...state.fixed[idx], name, amount: amt, day, type: fxTypeV, category: fxCategoryV };
     editingFxId = null;
     $("#fSubmit").textContent = "固定費を追加";
   } else {
-    state.fixed.push({ id: uid(), name, amount: amt, day, type: fxTypeV });
+    state.fixed.push({ id: uid(), name, amount: amt, day, type: fxTypeV, category: fxCategoryV });
   }
   $("#fName").value = ""; $("#fAmt").value = "";
   save(); render();
@@ -503,6 +569,13 @@ $("#sBal").onchange = () => {
 };
 $("#sAhead").onchange = () => {
   state.monthsAhead = Number($("#sAhead").value);
+  save(); render();
+};
+$("#btnAddCat").onclick = () => {
+  const name = $("#newCatInput").value.trim();
+  if (!name || state.categories.includes(name)) return;
+  state.categories.push(name);
+  $("#newCatInput").value = "";
   save(); render();
 };
 $("#btnExport").onclick = () => {
@@ -522,7 +595,8 @@ $("#importFile").onchange = (ev) => {
     try {
       const d = JSON.parse(r.result);
       if (!Array.isArray(d.entries)) throw new Error();
-      state = Object.assign({ startBalance:0, entries:[], fixed:[], monthsAhead:3, includeProvisional:true }, d);
+      state = Object.assign({ startBalance:0, entries:[], fixed:[], monthsAhead:3, includeProvisional:true, categories:[...DEFAULT_CATS] }, d);
+      if (!Array.isArray(state.categories) || state.categories.length === 0) state.categories = [...DEFAULT_CATS];
       $("#sBal").value = state.startBalance;
       $("#sAhead").value = state.monthsAhead;
       $("#toggleProv").checked = state.includeProvisional;
@@ -535,7 +609,7 @@ $("#importFile").onchange = (ev) => {
 };
 $("#btnClear").onclick = () => {
   if (confirm("すべての記帳データを削除しますか?")) {
-    state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3, includeProvisional: state.includeProvisional };
+    state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3, includeProvisional: state.includeProvisional, categories: state.categories };
     $("#sBal").value = 0;
     save(); render();
   }

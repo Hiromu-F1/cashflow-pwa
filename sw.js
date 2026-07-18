@@ -1,38 +1,60 @@
 // Service Worker for 資金通帳 PWA
-const CACHE = "cashflow-v1";
-const ASSETS = [
-  "./",
-  "./index.html",
+// ★ デプロイ時はこのバージョンを上げること (CLAUDE.md 参照)
+const CACHE = "cashflow-v3";
+
+// プリキャッシュ対象 (cache-first で提供するアセット)
+const STATIC_ASSETS = [
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon.svg"
 ];
 
-// Install: cache all assets
+// Install: 静的アセットをプリキャッシュ。skipWaiting しない→待機状態でバナーを表示させる
 self.addEventListener("install", ev => {
   ev.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS))
+    caches.open(CACHE).then(c => c.addAll(STATIC_ASSETS))
   );
-  self.skipWaiting();
 });
 
-// Activate: remove old caches
+// Activate: 古いキャッシュを全削除
 self.addEventListener("activate", ev => {
   ev.waitUntil(
     caches.keys().then(keys =>
       Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// Fetch: cache-first strategy (app shell), network-first for external
+// skipWaiting メッセージを受信したら即時切り替え
+self.addEventListener("message", ev => {
+  if (ev.data?.type === "SKIP_WAITING") self.skipWaiting();
+});
+
+// Fetch: HTML は network-first、その他は cache-first
 self.addEventListener("fetch", ev => {
   if (ev.request.method !== "GET") return;
   const url = new URL(ev.request.url);
-  // Same-origin: cache first, fallback to network
-  if (url.origin === self.location.origin) {
+  if (url.origin !== self.location.origin) return;
+
+  const isHTML = ev.request.destination === "document"
+    || url.pathname.endsWith(".html")
+    || url.pathname === "/"
+    || url.pathname.endsWith("/");
+
+  if (isHTML) {
+    // Network-first: 常に最新 HTML を取得、オフライン時のみキャッシュにフォールバック
+    ev.respondWith(
+      fetch(ev.request)
+        .then(res => {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(ev.request, clone));
+          return res;
+        })
+        .catch(() => caches.match(ev.request))
+    );
+  } else {
+    // Cache-first: キャッシュ優先、なければネットワーク取得してキャッシュに追加
     ev.respondWith(
       caches.match(ev.request).then(cached => {
         if (cached) return cached;
@@ -44,5 +66,4 @@ self.addEventListener("fetch", ev => {
       })
     );
   }
-  // Cross-origin: network first, no caching
 });

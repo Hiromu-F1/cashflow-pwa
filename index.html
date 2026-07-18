@@ -117,7 +117,10 @@
   .cat-add-row{display:flex;gap:8px;align-items:flex-end}
   .cat-add-row input{flex:1}
   /* Filter bar */
-  .filter-bar{padding:10px 20px 8px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line);background:var(--bg)}
+  .filter-header{padding:8px 20px;border-bottom:1px solid var(--line)}
+  .filter-toggle-btn{padding:5px 14px;border-radius:20px;border:1px solid var(--line);background:#fff;font-size:13px;cursor:pointer;color:#5A5F68;font-weight:500}
+  .filter-toggle-btn.filter-active{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700}
+  .filter-panel{padding:10px 20px 8px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px;background:var(--bg)}
   .filter-total-bar{padding:8px 20px;background:#FEF9EC;border-bottom:1px solid #F0D070;font-size:13px;font-variant-numeric:tabular-nums}
   .filter-total-bar span{font-weight:700}
   .chip.chip-cat.sel{background:#2D5F9E;border-color:#2D5F9E}
@@ -154,13 +157,18 @@
   </nav>
 
   <div id="ledgerFilter">
-    <div class="filter-bar">
-      <div class="chip-row" id="filterProvChips">
-        <button class="chip sel" data-prov="all">すべて</button>
-        <button class="chip" data-prov="confirmed">確定</button>
-        <button class="chip" data-prov="provisional">仮</button>
+    <div class="filter-header">
+      <button id="btnFilterToggle" class="filter-toggle-btn">絞り込み</button>
+    </div>
+    <div id="filterPanel" class="hidden">
+      <div class="filter-panel">
+        <div class="chip-row" id="filterProvChips">
+          <button class="chip sel" data-prov="all">すべて</button>
+          <button class="chip" data-prov="confirmed">確定</button>
+          <button class="chip" data-prov="provisional">仮</button>
+        </div>
+        <div class="chip-row" id="filterCatChips"></div>
       </div>
-      <div class="chip-row" id="filterCatChips"></div>
     </div>
     <div id="filterTotalBar" class="filter-total-bar hidden"></div>
   </div>
@@ -331,6 +339,16 @@ function renderCatManage() {
 // ---------- filter state (not persisted) ----------
 let filterProv = "all";   // "all" | "confirmed" | "provisional"
 let filterCat  = null;    // null | string
+let filterPanelOpen = false;
+
+function updateFilterBtn() {
+  const parts = [];
+  if (filterProv !== "all") parts.push(filterProv === "confirmed" ? "確定" : "仮");
+  if (filterCat !== null) parts.push(filterCat);
+  const btn = $("#btnFilterToggle");
+  btn.textContent = parts.length > 0 ? `絞り込み: ${parts.join("・")}` : "絞り込み";
+  btn.classList.toggle("filter-active", parts.length > 0);
+}
 
 function renderFilterCatChips() {
   const el = $("#filterCatChips");
@@ -341,6 +359,7 @@ function renderFilterCatChips() {
     ).join("");
   el.querySelectorAll(".chip-cat").forEach(b => b.onclick = () => {
     filterCat = b.dataset.fc === "__all" ? null : b.dataset.fc;
+    updateFilterBtn();
     render();
   });
 }
@@ -349,6 +368,7 @@ function initFilterProvChips() {
     filterProv = b.dataset.prov;
     $$("#filterProvChips .chip").forEach(x => x.classList.remove("sel"));
     b.classList.add("sel");
+    updateFilterBtn();
     render();
   });
 }
@@ -711,6 +731,10 @@ $("#sAhead").value = state.monthsAhead;
 $("#toggleProv").checked = state.includeProvisional;
 $("#toggleProv").onchange = () => { state.includeProvisional = $("#toggleProv").checked; save(); render(); };
 initFilterProvChips();
+$("#btnFilterToggle").onclick = () => {
+  filterPanelOpen = !filterPanelOpen;
+  $("#filterPanel").classList.toggle("hidden", !filterPanelOpen);
+};
 render();
 
 // ---------- Service Worker ----------

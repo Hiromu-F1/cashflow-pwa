@@ -80,6 +80,20 @@
   .io-row button{flex:1;padding:10px 0;border-radius:8px;border:1px solid var(--line);background:#fff;
       font-size:13px;cursor:pointer;color:#5A5F68}
   @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+  /* Action sheet */
+  .sheet-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:flex-end;justify-content:center}
+  .sheet-overlay.hidden{display:none}
+  .sheet{width:100%;max-width:560px;background:#fff;border-radius:20px 20px 0 0;padding:0 12px calc(20px + env(safe-area-inset-bottom));animation:slideUp .2s ease}
+  @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  .sheet-handle{width:36px;height:4px;background:#D1D3D8;border-radius:2px;margin:12px auto 6px}
+  .sheet-info{text-align:center;padding:6px 0 10px;font-size:13px;color:var(--mut);border-bottom:1px solid var(--line);margin-bottom:6px}
+  .sheet-btn{display:block;width:100%;padding:15px 12px;border:none;background:none;font-size:16px;cursor:pointer;border-radius:10px;text-align:center;color:var(--ink);margin-bottom:2px}
+  .sheet-btn:active{background:var(--line)}
+  .sheet-btn-accent{color:var(--in);font-weight:700}
+  .sheet-btn-danger{color:var(--out)}
+  .sheet-btn-cancel{color:var(--mut);border-top:1px solid var(--line);margin-top:6px;padding-top:14px}
+  .row[data-eid]{cursor:pointer}
+  .row[data-eid]:active{background:rgba(0,0,0,.04);border-radius:6px;margin:0 -4px;padding-left:4px;padding-right:4px}
 </style>
 </head>
 <body>
@@ -147,6 +161,17 @@
     <button class="primary danger" id="btnClear">全データを削除</button>
     <p class="hint">データはこのブラウザ内(localStorage)に保存されます。別の端末・ブラウザに移すときは書き出し→読み込みを使ってください。</p>
   </div>
+
+  <!-- Action Sheet (ledger entries) -->
+  <div id="actionSheet" class="sheet-overlay hidden">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-info" id="sheetInfo"></div>
+      <button id="sheetEdit" class="sheet-btn">編集</button>
+      <button id="sheetDel" class="sheet-btn sheet-btn-danger">削除</button>
+      <button class="sheet-btn sheet-btn-cancel" onclick="hideSheet()">キャンセル</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -164,6 +189,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;","
 // ---------- state ----------
 let state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3 };
 let addTypeV = "out", fxTypeV = "out";
+let editingId = null;
 
 function load() {
   try {
@@ -247,21 +273,20 @@ function render() {
     </div>`;
     if (!g || !g.rows.length) html += `<div class="empty">記帳なし</div>`;
     else for (const r of g.rows) {
-      html += `<div class="row${r.date < today ? " past" : ""}">
+      html += `<div class="row${r.date < today ? " past" : ""}"${r.isFixed ? "" : ` data-eid="${r.id}"`}>
         <div class="r-left"><span class="r-date">${Number(r.date.slice(8,10))}日</span>
           <span class="r-name">${esc(r.name)}${r.isFixed ? '<span class="fx-badge">固定</span>' : ""}</span></div>
         <div class="r-right">
           <span class="amt ${r.type==="in"?"i":"o"}">${r.type==="in"?"+":"−"}${yen(r.amount)}</span>
           <span class="run${r.balance<0?" neg":""}">残 ${r.balance<0?"−":""}${yen(r.balance)}</span></div>
-        ${r.isFixed ? "" : `<button class="del" data-del="${r.id}" aria-label="削除">×</button>`}
       </div>`;
     }
     html += `</section>`;
   }
   $("#ledger").innerHTML = html;
-  $$("#ledger .del").forEach(b => b.onclick = () => {
-    state.entries = state.entries.filter(e => e.id !== b.dataset.del);
-    save(); render();
+  $$("#ledger .row[data-eid]").forEach(row => row.onclick = () => {
+    const entry = state.entries.find(e => e.id === row.dataset.eid);
+    if (entry) showSheet(entry);
   });
 
   // fixed list
@@ -279,12 +304,21 @@ function render() {
 }
 
 // ---------- tabs ----------
-$$("nav button").forEach(b => b.onclick = () => {
-  $$("nav button").forEach(x => x.classList.remove("active"));
-  b.classList.add("active");
-  ["ledger","add","fixed","settings"].forEach(id =>
-    $("#"+id).classList.toggle("hidden", id !== b.dataset.tab));
-});
+function switchTab(id) {
+  if (editingId) {
+    editingId = null;
+    $("#aSubmit").textContent = "記帳する";
+    addTypeV = "out";
+    $$("#addType button").forEach(x => x.className = "");
+    [...$$("#addType button")].find(b => b.dataset.v === "out").className = "sel-out";
+    $("#aDate").value = todayStr();
+    $("#aName").value = ""; $("#aAmt").value = "";
+  }
+  $$("nav button").forEach(x => x.classList.toggle("active", x.dataset.tab === id));
+  ["ledger","add","fixed","settings"].forEach(tab =>
+    $("#"+tab).classList.toggle("hidden", tab !== id));
+}
+$$("nav button").forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 
 // ---------- type switches ----------
 function bindSwitch(rootSel, setter) {
@@ -297,6 +331,32 @@ function bindSwitch(rootSel, setter) {
 bindSwitch("#addType", v => addTypeV = v);
 bindSwitch("#fxType",  v => fxTypeV  = v);
 
+// ---------- action sheet (ledger) ----------
+function showSheet(entry) {
+  $("#sheetInfo").textContent = `${entry.name}　${entry.type==="in"?"+":"−"}${yen(entry.amount)}`;
+  $("#sheetEdit").onclick = () => { hideSheet(); startEdit(entry); };
+  $("#sheetDel").onclick = () => {
+    hideSheet();
+    state.entries = state.entries.filter(e => e.id !== entry.id);
+    save(); render();
+  };
+  $("#actionSheet").onclick = ev => { if (ev.target === ev.currentTarget) hideSheet(); };
+  $("#actionSheet").classList.remove("hidden");
+}
+function hideSheet() { $("#actionSheet").classList.add("hidden"); }
+function startEdit(entry) {
+  switchTab("add");
+  editingId = entry.id;
+  addTypeV = entry.type;
+  $$("#addType button").forEach(x => x.className = "");
+  [...$$("#addType button")].find(b => b.dataset.v === entry.type).className =
+    entry.type === "in" ? "sel-in" : "sel-out";
+  $("#aDate").value = entry.date;
+  $("#aName").value = entry.name;
+  $("#aAmt").value = entry.amount;
+  $("#aSubmit").textContent = "更新する";
+}
+
 // ---------- add entry ----------
 $("#aDate").value = todayStr();
 $("#aSubmit").onclick = () => {
@@ -304,10 +364,17 @@ $("#aSubmit").onclick = () => {
   const amt = Number($("#aAmt").value.replace(/[,，]/g, ""));
   const date = $("#aDate").value;
   if (!name || !amt || !date) return;
-  state.entries.push({ id: uid(), date, type: addTypeV, name, amount: amt });
+  if (editingId) {
+    const idx = state.entries.findIndex(e => e.id === editingId);
+    if (idx !== -1) state.entries[idx] = { ...state.entries[idx], date, type: addTypeV, name, amount: amt };
+    editingId = null;
+    $("#aSubmit").textContent = "記帳する";
+  } else {
+    state.entries.push({ id: uid(), date, type: addTypeV, name, amount: amt });
+  }
   $("#aName").value = ""; $("#aAmt").value = "";
   save(); render();
-  $$("nav button")[0].click();
+  switchTab("ledger");
 };
 
 // ---------- add fixed ----------

@@ -94,6 +94,15 @@
   .sheet-btn-cancel{color:var(--mut);border-top:1px solid var(--line);margin-top:6px;padding-top:14px}
   .row[data-eid]{cursor:pointer}
   .row[data-eid]:active{background:rgba(0,0,0,.04);border-radius:6px;margin:0 -4px;padding-left:4px;padding-right:4px}
+  /* Provisional entries */
+  .row.prov{border-bottom-style:dashed;border-bottom-color:#D97706}
+  .row.prov .amt{color:#D97706!important}
+  .row.prov .run{color:#B45309}
+  .row.prov-off{opacity:.45}
+  .prov-badge{margin-left:6px;font-size:10px;color:#92400E;background:#FEF3C7;border-radius:4px;padding:1px 5px}
+  .prov-toggle{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:var(--mut);cursor:pointer;user-select:none}
+  .prov-toggle input[type=checkbox]{width:16px;height:16px;padding:0;border:none;background:none;accent-color:#D97706;flex-shrink:0}
+  .type-switch button.sel-prov{background:#D97706;border-color:#D97706;color:#fff;font-weight:700}
 </style>
 </head>
 <body>
@@ -103,6 +112,10 @@
       <div class="eyebrow">資金通帳</div>
       <div class="bal-label" id="balLabel"></div>
       <div class="balance" id="finalBal"></div>
+      <label class="prov-toggle">
+        <input type="checkbox" id="toggleProv" checked>
+        <span>仮置きを含める</span>
+      </label>
     </div>
     <div id="saveTag"></div>
   </header>
@@ -124,6 +137,10 @@
     <label>日付 <input type="date" id="aDate"></label>
     <label>内容 <input id="aName" placeholder="例: 家賃、カード引落、給与"></label>
     <label>金額(円) <input id="aAmt" inputmode="numeric" placeholder="50000"></label>
+    <div class="type-switch" id="provType">
+      <button type="button" data-v="false" class="sel-in">確定</button>
+      <button type="button" data-v="true">仮</button>
+    </div>
     <button class="primary" id="aSubmit">記帳する</button>
   </form>
 
@@ -179,6 +196,7 @@
       <div class="sheet-handle"></div>
       <div class="sheet-info" id="sheetInfo"></div>
       <button id="sheetEdit" class="sheet-btn">編集</button>
+      <button id="sheetConfirm" class="sheet-btn sheet-btn-accent hidden">確定にする</button>
       <button id="sheetDel" class="sheet-btn sheet-btn-danger">削除</button>
       <button class="sheet-btn sheet-btn-cancel" onclick="hideSheet()">キャンセル</button>
     </div>
@@ -198,8 +216,8 @@ const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 // ---------- state ----------
-let state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3 };
-let addTypeV = "out", fxTypeV = "out";
+let state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3, includeProvisional: true };
+let addTypeV = "out", fxTypeV = "out", addProvisional = false;
 let editingId = null;
 
 function load() {
@@ -251,13 +269,15 @@ function buildLedger() {
   let bal = Number(state.startBalance) || 0;
   const byMonth = new Map();
   for (const r of rows) {
-    bal += r.type === "in" ? r.amount : -r.amount;
+    const counted = !r.provisional || state.includeProvisional;
+    if (counted) bal += r.type === "in" ? r.amount : -r.amount;
     r.balance = bal;
+    r.counted = counted;
     const mk = r.date.slice(0, 7);
     if (!byMonth.has(mk)) byMonth.set(mk, { rows: [], inSum: 0, outSum: 0 });
     const g = byMonth.get(mk);
     g.rows.push(r);
-    r.type === "in" ? g.inSum += r.amount : g.outSum += r.amount;
+    if (counted) r.type === "in" ? g.inSum += r.amount : g.outSum += r.amount;
   }
   return { months, byMonth, finalBalance: bal };
 }
@@ -284,9 +304,10 @@ function render() {
     </div>`;
     if (!g || !g.rows.length) html += `<div class="empty">記帳なし</div>`;
     else for (const r of g.rows) {
-      html += `<div class="row${r.date < today ? " past" : ""}"${r.isFixed ? "" : ` data-eid="${r.id}"`}>
+      const rc = [r.date < today?"past":"", r.provisional?"prov":"", r.provisional&&!r.counted?"prov-off":""].filter(Boolean).join(" ");
+      html += `<div class="row${rc?" "+rc:""}"${r.isFixed ? "" : ` data-eid="${r.id}"`}>
         <div class="r-left"><span class="r-date">${Number(r.date.slice(8,10))}日</span>
-          <span class="r-name">${esc(r.name)}${r.isFixed ? '<span class="fx-badge">固定</span>' : ""}</span></div>
+          <span class="r-name">${esc(r.name)}${r.isFixed ? '<span class="fx-badge">固定</span>' : ""}${r.provisional ? '<span class="prov-badge">仮</span>' : ""}</span></div>
         <div class="r-right">
           <span class="amt ${r.type==="in"?"i":"o"}">${r.type==="in"?"+":"−"}${yen(r.amount)}</span>
           <span class="run${r.balance<0?" neg":""}">残 ${r.balance<0?"−":""}${yen(r.balance)}</span></div>
@@ -323,6 +344,9 @@ function switchTab(id) {
     addTypeV = "out";
     $$("#addType button").forEach(x => x.className = "");
     [...$$("#addType button")].find(b => b.dataset.v === "out").className = "sel-out";
+    addProvisional = false;
+    $$("#provType button").forEach(x => x.className = "");
+    [...$$("#provType button")].find(b => b.dataset.v === "false").className = "sel-in";
     $("#aDate").value = todayStr();
     $("#aName").value = ""; $("#aAmt").value = "";
   }
@@ -350,6 +374,11 @@ function bindSwitch(rootSel, setter) {
 }
 bindSwitch("#addType", v => addTypeV = v);
 bindSwitch("#fxType",  v => fxTypeV  = v);
+$$("#provType button").forEach(b => b.onclick = () => {
+  addProvisional = b.dataset.v === "true";
+  $$("#provType button").forEach(x => x.className = "");
+  b.className = addProvisional ? "sel-prov" : "sel-in";
+});
 
 // ---------- action sheet (fixed costs) ----------
 let editingFxId = null;
@@ -382,6 +411,14 @@ function startFxEdit(fc) {
 function showSheet(entry) {
   $("#sheetInfo").textContent = `${entry.name}　${entry.type==="in"?"+":"−"}${yen(entry.amount)}`;
   $("#sheetEdit").onclick = () => { hideSheet(); startEdit(entry); };
+  const cb = $("#sheetConfirm");
+  cb.classList.toggle("hidden", !entry.provisional);
+  cb.onclick = () => {
+    hideSheet();
+    const idx = state.entries.findIndex(e => e.id === entry.id);
+    if (idx !== -1) state.entries[idx].provisional = false;
+    save(); render();
+  };
   $("#sheetDel").onclick = () => {
     hideSheet();
     state.entries = state.entries.filter(e => e.id !== entry.id);
@@ -401,6 +438,10 @@ function startEdit(entry) {
   $("#aDate").value = entry.date;
   $("#aName").value = entry.name;
   $("#aAmt").value = entry.amount;
+  addProvisional = !!entry.provisional;
+  $$("#provType button").forEach(x => x.className = "");
+  [...$$("#provType button")].find(b => b.dataset.v === String(addProvisional)).className =
+    addProvisional ? "sel-prov" : "sel-in";
   $("#aSubmit").textContent = "更新する";
 }
 
@@ -413,11 +454,11 @@ $("#aSubmit").onclick = () => {
   if (!name || !amt || !date) return;
   if (editingId) {
     const idx = state.entries.findIndex(e => e.id === editingId);
-    if (idx !== -1) state.entries[idx] = { ...state.entries[idx], date, type: addTypeV, name, amount: amt };
+    if (idx !== -1) state.entries[idx] = { ...state.entries[idx], date, type: addTypeV, name, amount: amt, provisional: addProvisional };
     editingId = null;
     $("#aSubmit").textContent = "記帳する";
   } else {
-    state.entries.push({ id: uid(), date, type: addTypeV, name, amount: amt });
+    state.entries.push({ id: uid(), date, type: addTypeV, name, amount: amt, provisional: addProvisional });
   }
   $("#aName").value = ""; $("#aAmt").value = "";
   save(); render();
@@ -468,9 +509,10 @@ $("#importFile").onchange = (ev) => {
     try {
       const d = JSON.parse(r.result);
       if (!Array.isArray(d.entries)) throw new Error();
-      state = Object.assign({ startBalance:0, entries:[], fixed:[], monthsAhead:3 }, d);
+      state = Object.assign({ startBalance:0, entries:[], fixed:[], monthsAhead:3, includeProvisional:true }, d);
       $("#sBal").value = state.startBalance;
       $("#sAhead").value = state.monthsAhead;
+      $("#toggleProv").checked = state.includeProvisional;
       save(); render();
       alert("読み込みました");
     } catch { alert("読み込めないファイルです。書き出したJSONを選んでください。"); }
@@ -480,7 +522,7 @@ $("#importFile").onchange = (ev) => {
 };
 $("#btnClear").onclick = () => {
   if (confirm("すべての記帳データを削除しますか?")) {
-    state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3 };
+    state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3, includeProvisional: state.includeProvisional };
     $("#sBal").value = 0;
     save(); render();
   }
@@ -490,6 +532,8 @@ $("#btnClear").onclick = () => {
 load();
 $("#sBal").value = state.startBalance;
 $("#sAhead").value = state.monthsAhead;
+$("#toggleProv").checked = state.includeProvisional;
+$("#toggleProv").onchange = () => { state.includeProvisional = $("#toggleProv").checked; save(); render(); };
 render();
 
 // ---------- Service Worker ----------

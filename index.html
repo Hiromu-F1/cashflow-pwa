@@ -119,10 +119,18 @@
   .filter-header{padding:8px 20px;border-bottom:1px solid var(--line)}
   .filter-toggle-btn{padding:5px 14px;border-radius:20px;border:1px solid var(--line);background:#fff;font-size:13px;cursor:pointer;color:#5A5F68;font-weight:500}
   .filter-toggle-btn.filter-active{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700}
-  .filter-panel{padding:10px 20px 8px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px;background:var(--bg)}
   .filter-total-bar{padding:8px 20px;background:#FEF9EC;border-bottom:1px solid #F0D070;font-size:13px;font-variant-numeric:tabular-nums}
   .filter-total-bar span{font-weight:700}
-  .chip.chip-cat.sel{background:#2D5F9E;border-color:#2D5F9E}
+  /* Filter dropdown buttons */
+  .filter-dd-bar{display:flex;gap:8px;padding:8px 20px 10px}
+  .filter-dd-btn{flex:1;padding:7px 6px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:12px;cursor:pointer;color:#5A5F68;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
+  .filter-dd-btn.has-filter{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700}
+  .filter-dd-btn.dd-open{background:#F0F0EE;border-color:#8A8F98}
+  .filter-dd-btn.has-filter.dd-open{background:#3A3F47}
+  .filter-dropdown{padding:10px 20px 12px;border-top:1px solid var(--line)}
+  .filter-dd-year{font-size:11px;color:var(--mut);margin:6px 0 5px;font-weight:600}
+  .chip.chip-cat.sel,.chip.chip-prov.sel{background:#2D5F9E;border-color:#2D5F9E;color:#fff}
+  .chip.chip-m.sel{background:#5B4FCF;border-color:#5B4FCF;color:#fff}
   .submit-row{display:flex;gap:10px}
   .submit-row .primary{flex:1;margin-top:0}
   /* 編集後ハイライト */
@@ -131,8 +139,6 @@
   /* スキップされた固定費行 */
   .row.skipped{opacity:.38}
   .row.skipped .r-name{text-decoration:line-through}
-  /* 月フィルターチップ */
-  .chip.chip-month.sel{background:#5B4FCF;border-color:#5B4FCF;color:#fff}
 </style>
 </head>
 <body>
@@ -165,15 +171,12 @@
       <button id="btnFilterToggle" class="filter-toggle-btn">絞り込み</button>
     </div>
     <div id="filterPanel" class="hidden">
-      <div class="filter-panel">
-        <div class="chip-row" id="filterProvChips">
-          <button class="chip sel" data-prov="all">すべて</button>
-          <button class="chip" data-prov="confirmed">確定</button>
-          <button class="chip" data-prov="provisional">仮</button>
-        </div>
-        <div class="chip-row" id="filterMonthChips"></div>
-        <div class="chip-row" id="filterCatChips"></div>
+      <div class="filter-dd-bar">
+        <button id="fBtnProv" class="filter-dd-btn">すべて▽</button>
+        <button id="fBtnMonth" class="filter-dd-btn">月▽</button>
+        <button id="fBtnCat" class="filter-dd-btn">カテゴリ▽</button>
       </div>
+      <div id="filterDropdown" class="filter-dropdown hidden"></div>
     </div>
     <div id="filterTotalBar" class="filter-total-bar hidden"></div>
   </div>
@@ -377,61 +380,118 @@ function renderCatManage() {
 
 // ---------- filter state (not persisted) ----------
 let filterProv = "all";   // "all" | "confirmed" | "provisional"
-let filterCat  = null;    // null | string
-let filterMonth = null;   // null | "2026-07"
+let filterCats = [];      // selected categories (empty = all)
+let filterMonth = null;   // null | "YYYY-MM"
 let filterPanelOpen = false;
+let activeDDBtn = null;   // null | "prov" | "month" | "cat"
+let lastMonths = [];      // render()で更新される月リスト(DD用)
 
+// 絞り込みトグルボタンの状態更新
 function updateFilterBtn() {
-  const parts = [];
-  if (filterProv !== "all") parts.push(filterProv === "confirmed" ? "確定" : "仮");
-  if (filterCat !== null) parts.push(filterCat);
-  if (filterMonth !== null) {
-    const [y, m] = filterMonth.split("-");
-    const nowY = String(new Date().getFullYear());
-    parts.push(y === nowY ? `${Number(m)}月` : `${y}/${Number(m)}月`);
-  }
+  const active = filterProv !== "all" || filterCats.length > 0 || filterMonth !== null;
   const btn = $("#btnFilterToggle");
-  btn.textContent = parts.length > 0 ? `絞り込み: ${parts.join("・")}` : "絞り込み";
-  btn.classList.toggle("filter-active", parts.length > 0);
+  btn.classList.toggle("filter-active", active);
 }
 
-function renderFilterMonthChips(months) {
-  const el = $("#filterMonthChips");
-  if (!el) return;
-  const nowY = String(new Date().getFullYear());
-  el.innerHTML = `<button class="chip chip-month${filterMonth===null?" sel":""}" data-fm="__all">月: すべて</button>` +
-    months.map(mk => {
+// 3つのDDボタンラベルと状態を更新
+function updateDDBtns() {
+  // prov button
+  const pb = $("#fBtnProv");
+  if (pb) {
+    const label = filterProv === "all" ? "すべて" : filterProv === "confirmed" ? "確定" : "仮";
+    pb.textContent = label + "▽";
+    pb.classList.toggle("has-filter", filterProv !== "all");
+    pb.classList.toggle("dd-open", activeDDBtn === "prov");
+  }
+  // month button
+  const mb = $("#fBtnMonth");
+  if (mb) {
+    if (filterMonth) {
+      const [y, m] = filterMonth.split("-");
+      const nowY = String(new Date().getFullYear());
+      mb.textContent = (y === nowY ? `${Number(m)}月` : `${y}/${Number(m)}月`) + "▽";
+      mb.classList.add("has-filter");
+    } else {
+      mb.textContent = "月▽";
+      mb.classList.remove("has-filter");
+    }
+    mb.classList.toggle("dd-open", activeDDBtn === "month");
+  }
+  // cat button
+  const cb = $("#fBtnCat");
+  if (cb) {
+    if (filterCats.length === 0) {
+      cb.textContent = "カテゴリ▽";
+      cb.classList.remove("has-filter");
+    } else if (filterCats.length === 1) {
+      cb.textContent = filterCats[0] + "▽";
+      cb.classList.add("has-filter");
+    } else {
+      cb.textContent = filterCats[0] + "+" + (filterCats.length - 1) + "▽";
+      cb.classList.add("has-filter");
+    }
+    cb.classList.toggle("dd-open", activeDDBtn === "cat");
+  }
+}
+
+function openDD(type) {
+  const dd = $("#filterDropdown");
+  if (!dd) return;
+  if (activeDDBtn === type) {
+    // 同じボタンを再度タップ → 閉じる
+    activeDDBtn = null;
+    dd.classList.add("hidden");
+    updateDDBtns();
+    return;
+  }
+  activeDDBtn = type;
+  if (type === "prov") {
+    const opts = [["all","すべて"],["confirmed","確定"],["provisional","仮"]];
+    dd.innerHTML = `<div class="chip-row">${opts.map(([v,l])=>
+      `<button class="chip chip-prov${filterProv===v?" sel":""}" data-prov="${v}">${l}</button>`
+    ).join("")}</div>`;
+    dd.querySelectorAll(".chip-prov").forEach(b => b.onclick = () => {
+      filterProv = b.dataset.prov;
+      updateFilterBtn(); updateDDBtns(); render();
+    });
+  } else if (type === "month") {
+    // 年ごとにグループ化
+    const byYear = {};
+    lastMonths.forEach(mk => {
       const [y, m] = mk.split("-");
-      const label = y === nowY ? `${Number(m)}月` : `${y}/${Number(m)}月`;
-      return `<button class="chip chip-month${filterMonth===mk?" sel":""}" data-fm="${mk}">${label}</button>`;
-    }).join("");
-  el.querySelectorAll(".chip-month").forEach(b => b.onclick = () => {
-    filterMonth = b.dataset.fm === "__all" ? null : b.dataset.fm;
-    updateFilterBtn();
-    render();
-  });
-}
-function renderFilterCatChips() {
-  const el = $("#filterCatChips");
-  if (!el) return;
-  el.innerHTML = `<button class="chip chip-cat${filterCat===null?" sel":""}" data-fc="__all">すべて</button>` +
-    state.categories.map(c =>
-      `<button class="chip chip-cat${filterCat===c?" sel":""}" data-fc="${esc(c)}">${esc(c)}</button>`
-    ).join("");
-  el.querySelectorAll(".chip-cat").forEach(b => b.onclick = () => {
-    filterCat = b.dataset.fc === "__all" ? null : b.dataset.fc;
-    updateFilterBtn();
-    render();
-  });
-}
-function initFilterProvChips() {
-  $$("#filterProvChips .chip").forEach(b => b.onclick = () => {
-    filterProv = b.dataset.prov;
-    $$("#filterProvChips .chip").forEach(x => x.classList.remove("sel"));
-    b.classList.add("sel");
-    updateFilterBtn();
-    render();
-  });
+      if (!byYear[y]) byYear[y] = [];
+      byYear[y].push({ mk, m: Number(m) });
+    });
+    const nowY = String(new Date().getFullYear());
+    let html = "";
+    for (const y of Object.keys(byYear).sort()) {
+      const label = y === nowY ? `${y}年` : `${y}年`;
+      html += `<div class="filter-dd-year">${label}</div><div class="chip-row">`;
+      html += byYear[y].map(({ mk, m }) =>
+        `<button class="chip chip-m${filterMonth===mk?" sel":""}" data-mk="${mk}">${m}月</button>`
+      ).join("");
+      html += `</div>`;
+    }
+    dd.innerHTML = html;
+    dd.querySelectorAll(".chip-m").forEach(b => b.onclick = () => {
+      filterMonth = filterMonth === b.dataset.mk ? null : b.dataset.mk;
+      updateFilterBtn(); updateDDBtns(); render();
+    });
+  } else if (type === "cat") {
+    dd.innerHTML = `<div class="chip-row">${state.categories.map(c =>
+      `<button class="chip chip-cat${filterCats.includes(c)?" sel":""}" data-cat="${esc(c)}">${esc(c)}</button>`
+    ).join("")}</div>`;
+    dd.querySelectorAll(".chip-cat").forEach(b => b.onclick = () => {
+      const c = b.dataset.cat;
+      if (filterCats.includes(c)) filterCats = filterCats.filter(x => x !== c);
+      else filterCats = [...filterCats, c];
+      b.classList.toggle("sel", filterCats.includes(c));
+      updateFilterBtn(); updateDDBtns();
+      render();
+    });
+  }
+  dd.classList.remove("hidden");
+  updateDDBtns();
 }
 
 // ---------- ledger build ----------
@@ -496,19 +556,16 @@ function render() {
   fb.classList.toggle("neg", L.finalBalance < 0);
 
   // filter state → UI
-  const isFiltered = filterProv !== "all" || filterCat !== null || filterMonth !== null;
-  const onlyMonthFilter = filterMonth !== null && filterProv === "all" && filterCat === null;
+  const isFiltered = filterProv !== "all" || filterCats.length > 0 || filterMonth !== null;
+  const onlyMonthFilter = filterMonth !== null && filterProv === "all" && filterCats.length === 0;
   function rowMatchesFilter(r) {
     const provOk = filterProv === "all" || (filterProv === "confirmed" && !r.provisional) || (filterProv === "provisional" && !!r.provisional);
-    const catOk  = filterCat === null || (r.category||"その他") === filterCat;
+    const catOk  = filterCats.length === 0 || filterCats.includes(r.category || "その他");
     const monthOk = filterMonth === null || r.date.startsWith(filterMonth);
     return provOk && catOk && monthOk;
   }
-  renderFilterMonthChips(L.months);
-  renderFilterCatChips();
-  $$("#filterProvChips .chip").forEach(b => {
-    b.classList.toggle("sel", b.dataset.prov === filterProv);
-  });
+  lastMonths = L.months;
+  updateDDBtns();
 
   // filter total
   let filterTotal = 0;
@@ -872,11 +929,19 @@ $("#sBal").value = state.startBalance;
 $("#sAhead").value = state.monthsAhead;
 $("#toggleProv").checked = state.includeProvisional;
 $("#toggleProv").onchange = () => { state.includeProvisional = $("#toggleProv").checked; save(); render(); };
-initFilterProvChips();
 $("#btnFilterToggle").onclick = () => {
   filterPanelOpen = !filterPanelOpen;
   $("#filterPanel").classList.toggle("hidden", !filterPanelOpen);
+  if (!filterPanelOpen) { activeDDBtn = null; const dd = $("#filterDropdown"); if (dd) dd.classList.add("hidden"); }
 };
+// DDBtns click
+(function() {
+  const pairs = [["fBtnProv","prov"],["fBtnMonth","month"],["fBtnCat","cat"]];
+  pairs.forEach(([id, type]) => {
+    const btn = $("#"+id);
+    if (btn) btn.onclick = () => openDD(type);
+  });
+})();
 render();
 
 // ---------- Service Worker ----------

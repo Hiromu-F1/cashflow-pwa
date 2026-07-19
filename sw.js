@@ -1,6 +1,6 @@
 // Service Worker for 資金通帳 PWA
 // ★ デプロイ時はこのバージョンを上げること (CLAUDE.md 参照)
-const CACHE = "cashflow-v9";
+const CACHE = "cashflow-v10";
 
 // プリキャッシュ対象 (cache-first で提供するアセット)
 const STATIC_ASSETS = [

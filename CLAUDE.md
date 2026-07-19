@@ -8,14 +8,14 @@
 
 `sw.js` の先頭:
 ```js
-const CACHE = "cashflow-v6";   // ← ここのバージョンを上げる
+const CACHE = "cashflow-v7";   // ← ここのバージョンを上げる
 ```
 
 #### バージョンの上げ方
 
 | 変更内容 | 例 |
 |---|---|
-| HTML / JS / CSS を変更したとき | `cashflow-v6` → `cashflow-v7` |
+| HTML / JS / CSS を変更したとき | `cashflow-v7` → `cashflow-v8` |
 | アイコン・マニフェストのみ変更 | 同上 |
 | Service Worker 自体の変更 | 同上 |
 

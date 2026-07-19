@@ -125,6 +125,14 @@
   .chip.chip-cat.sel{background:#2D5F9E;border-color:#2D5F9E}
   .submit-row{display:flex;gap:10px}
   .submit-row .primary{flex:1;margin-top:0}
+  /* 編集後ハイライト */
+  @keyframes rowHighlight{0%{background:rgba(217,119,6,.22);border-radius:6px}100%{background:transparent;border-radius:6px}}
+  .row-highlight{animation:rowHighlight 1.6s ease-out forwards}
+  /* スキップされた固定費行 */
+  .row.skipped{opacity:.38}
+  .row.skipped .r-name{text-decoration:line-through}
+  /* 月フィルターチップ */
+  .chip.chip-month.sel{background:#5B4FCF;border-color:#5B4FCF;color:#fff}
 </style>
 </head>
 <body>
@@ -162,6 +170,7 @@
           <button class="chip" data-prov="confirmed">確定</button>
           <button class="chip" data-prov="provisional">仮</button>
         </div>
+        <div class="chip-row" id="filterMonthChips"></div>
         <div class="chip-row" id="filterCatChips"></div>
       </div>
     </div>
@@ -260,6 +269,16 @@
     </div>
   </div>
 
+  <!-- Action Sheet (通帳の固定費行 スキップ) -->
+  <div id="ledgerFxSheet" class="sheet-overlay hidden">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-info" id="ledgerFxSheetInfo"></div>
+      <button id="ledgerFxSheetSkip" class="sheet-btn"></button>
+      <button class="sheet-btn sheet-btn-cancel" onclick="hideLedgerFxSheet()">キャンセル</button>
+    </div>
+  </div>
+
   <!-- Action Sheet (ledger entries) -->
   <div id="actionSheet" class="sheet-overlay hidden">
     <div class="sheet">
@@ -287,7 +306,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;","
 
 // ---------- state ----------
 const DEFAULT_CATS = ["旅行","食費","固定費","カード","収入","その他"];
-let state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3, includeProvisional: true, categories: [...DEFAULT_CATS] };
+let state = { startBalance: 0, entries: [], fixed: [], fixedSkips: {}, monthsAhead: 3, includeProvisional: true, categories: [...DEFAULT_CATS] };
 let addTypeV = "out", fxTypeV = "out", addProvisional = false;
 let addCategoryV = "その他", fxCategoryV = "その他";
 let editingId = null;
@@ -309,6 +328,7 @@ function load() {
     if (!Array.isArray(state.categories) || state.categories.length === 0) state.categories = [...DEFAULT_CATS];
     state.entries = migrateArr(state.entries);
     state.fixed   = migrateArr(state.fixed);
+    if (!state.fixedSkips || typeof state.fixedSkips !== "object" || Array.isArray(state.fixedSkips)) state.fixedSkips = {};
   } catch (e) {}
 }
 let saveTimer;
@@ -356,17 +376,39 @@ function renderCatManage() {
 // ---------- filter state (not persisted) ----------
 let filterProv = "all";   // "all" | "confirmed" | "provisional"
 let filterCat  = null;    // null | string
+let filterMonth = null;   // null | "2026-07"
 let filterPanelOpen = false;
 
 function updateFilterBtn() {
   const parts = [];
   if (filterProv !== "all") parts.push(filterProv === "confirmed" ? "確定" : "仮");
   if (filterCat !== null) parts.push(filterCat);
+  if (filterMonth !== null) {
+    const [y, m] = filterMonth.split("-");
+    const nowY = String(new Date().getFullYear());
+    parts.push(y === nowY ? `${Number(m)}月` : `${y}/${Number(m)}月`);
+  }
   const btn = $("#btnFilterToggle");
   btn.textContent = parts.length > 0 ? `絞り込み: ${parts.join("・")}` : "絞り込み";
   btn.classList.toggle("filter-active", parts.length > 0);
 }
 
+function renderFilterMonthChips(months) {
+  const el = $("#filterMonthChips");
+  if (!el) return;
+  const nowY = String(new Date().getFullYear());
+  el.innerHTML = `<button class="chip chip-month${filterMonth===null?" sel":""}" data-fm="__all">月: すべて</button>` +
+    months.map(mk => {
+      const [y, m] = mk.split("-");
+      const label = y === nowY ? `${Number(m)}月` : `${y}/${Number(m)}月`;
+      return `<button class="chip chip-month${filterMonth===mk?" sel":""}" data-fm="${mk}">${label}</button>`;
+    }).join("");
+  el.querySelectorAll(".chip-month").forEach(b => b.onclick = () => {
+    filterMonth = b.dataset.fm === "__all" ? null : b.dataset.fm;
+    updateFilterBtn();
+    render();
+  });
+}
 function renderFilterCatChips() {
   const el = $("#filterCatChips");
   if (!el) return;
@@ -411,9 +453,11 @@ function buildLedger() {
     const lastDay = new Date(y, m, 0).getDate();
     for (const fc of state.fixed) {
       const day = Math.min(Number(fc.day) || 1, lastDay);
-      rows.push({ id: null, date: `${mk}-${pad(day)}`, type: fc.type,
+      const skipList = state.fixedSkips?.[fc.id] || [];
+      const skipped = skipList.includes(mk);
+      rows.push({ id: fc.id, date: `${mk}-${pad(day)}`, type: fc.type,
                   comment: fc.comment, category: fc.category,
-                  amount: Number(fc.amount), isFixed: true });
+                  amount: Number(fc.amount), isFixed: true, fxMonthKey: mk, skipped });
     }
     for (const e of state.entries)
       if (e.date.startsWith(mk)) rows.push({ ...e, isFixed: false });
@@ -425,14 +469,14 @@ function buildLedger() {
   for (const r of rows) {
     const isProv = !!r.provisional;
     const counted = !isProv || state.includeProvisional;
-    if (counted) bal += r.type === "in" ? r.amount : -r.amount;
+    if (counted && !r.skipped) bal += r.type === "in" ? r.amount : -r.amount;
     r.balance = bal;
     r.counted = counted;
     const mk = r.date.slice(0, 7);
     if (!byMonth.has(mk)) byMonth.set(mk, { rows: [], inSum: 0, outSum: 0, provInSum: 0, provOutSum: 0 });
     const g = byMonth.get(mk);
     g.rows.push(r);
-    if (counted) r.type === "in" ? g.inSum += r.amount : g.outSum += r.amount;
+    if (counted && !r.skipped) r.type === "in" ? g.inSum += r.amount : g.outSum += r.amount;
     if (isProv) r.type === "in" ? g.provInSum += r.amount : g.provOutSum += r.amount;
   }
   return { months, byMonth, finalBalance: bal };
@@ -450,12 +494,15 @@ function render() {
   fb.classList.toggle("neg", L.finalBalance < 0);
 
   // filter state → UI
-  const isFiltered = filterProv !== "all" || filterCat !== null;
+  const isFiltered = filterProv !== "all" || filterCat !== null || filterMonth !== null;
+  const onlyMonthFilter = filterMonth !== null && filterProv === "all" && filterCat === null;
   function rowMatchesFilter(r) {
     const provOk = filterProv === "all" || (filterProv === "confirmed" && !r.provisional) || (filterProv === "provisional" && !!r.provisional);
     const catOk  = filterCat === null || (r.category||"その他") === filterCat;
-    return provOk && catOk;
+    const monthOk = filterMonth === null || r.date.startsWith(filterMonth);
+    return provOk && catOk && monthOk;
   }
+  renderFilterMonthChips(L.months);
   renderFilterCatChips();
   $$("#filterProvChips .chip").forEach(b => {
     b.classList.toggle("sel", b.dataset.prov === filterProv);
@@ -494,11 +541,12 @@ function render() {
     </div>`;
     if (!visRows.length) html += `<div class="empty">記帳なし</div>`;
     else for (const r of visRows) {
-      const rc = [r.date < today?"past":"", r.provisional?"prov":"", r.provisional&&!r.counted?"prov-off":""].filter(Boolean).join(" ");
-      const balHtml = isFiltered ? "" : `<span class="run${r.balance<0?" neg":""}">残 ${r.balance<0?"−":""}${yen(r.balance)}</span>`;
+      const rc = [r.date < today?"past":"", r.provisional?"prov":"", r.provisional&&!r.counted?"prov-off":"", r.skipped?"skipped":""].filter(Boolean).join(" ");
+      const showBal = !isFiltered || onlyMonthFilter;
+      const balHtml = showBal ? `<span class="run${r.balance<0?" neg":""}">残 ${r.balance<0?"−":""}${yen(r.balance)}</span>` : "";
       // コメントがある場合のみカテゴリバッジを表示（コメント無しのときは表示名=カテゴリなので重複を避ける）
       const catBadge = r.comment ? `<span class="cat-badge">${esc(r.category||"その他")}</span>` : "";
-      html += `<div class="row${rc?" "+rc:""}"${r.isFixed ? "" : ` data-eid="${r.id}"`}>
+      html += `<div class="row${rc?" "+rc:""}"${r.isFixed ? ` data-fxid="${r.id}" data-fxmonth="${r.fxMonthKey}"` : ` data-eid="${r.id}"`}>
         <div class="r-left"><span class="r-date">${Number(r.date.slice(8,10))}日</span>
           <span class="r-name">${esc(dname(r))}${r.isFixed ? '<span class="fx-badge">固定</span>' : ""}${r.provisional ? '<span class="prov-badge">仮</span>' : ""}${catBadge}</span></div>
         <div class="r-right">
@@ -512,6 +560,14 @@ function render() {
   $$("#ledger .row[data-eid]").forEach(row => row.onclick = () => {
     const entry = state.entries.find(e => e.id === row.dataset.eid);
     if (entry) showSheet(entry);
+  });
+  $$("#ledger .row[data-fxid]").forEach(row => row.onclick = () => {
+    const fc = state.fixed.find(f => f.id === row.dataset.fxid);
+    const mk = row.dataset.fxmonth;
+    if (fc && mk) {
+      const isSkipped = (state.fixedSkips?.[fc.id] || []).includes(mk);
+      showLedgerFxSheet(fc, mk, isSkipped);
+    }
   });
 
   // category chips
@@ -582,6 +638,15 @@ $$("#provType button").forEach(b => b.onclick = () => {
   b.className = addProvisional ? "sel-prov" : "sel-in";
 });
 
+// ---------- scroll & highlight after edit ----------
+function scrollAndHighlight(id) {
+  const row = document.querySelector(`#ledger .row[data-eid="${id}"]`);
+  if (!row) return;
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  row.classList.add("row-highlight");
+  setTimeout(() => row.classList.remove("row-highlight"), 1700);
+}
+
 // ---------- action sheet (fixed costs) ----------
 let editingFxId = null;
 function showFxSheet(fc) {
@@ -590,6 +655,7 @@ function showFxSheet(fc) {
   $("#fxSheetDel").onclick = () => {
     hideFxSheet();
     state.fixed = state.fixed.filter(f => f.id !== fc.id);
+    if (state.fixedSkips) delete state.fixedSkips[fc.id];
     save(); render();
   };
   $("#fxSheet").onclick = ev => { if (ev.target === ev.currentTarget) hideFxSheet(); };
@@ -611,6 +677,39 @@ function startFxEdit(fc) {
   $("#fxCancelEdit").classList.remove("hidden");
   $("#fSubmit").textContent = "固定費を更新";
 }
+
+// ---------- action sheet (通帳の固定費行 スキップ) ----------
+function showLedgerFxSheet(fc, mk, isSkipped) {
+  const [y, m] = mk.split("-");
+  const nowY = String(new Date().getFullYear());
+  const monthLabel = y === nowY ? `${Number(m)}月` : `${y}年${Number(m)}月`;
+  $("#ledgerFxSheetInfo").textContent = `${monthLabel} ・ ${dname(fc)}　${fc.type==="in"?"+":"−"}${yen(fc.amount)}`;
+  const skipBtn = $("#ledgerFxSheetSkip");
+  if (isSkipped) {
+    skipBtn.textContent = "スキップを解除";
+    skipBtn.className = "sheet-btn sheet-btn-accent";
+    skipBtn.onclick = () => {
+      hideLedgerFxSheet();
+      if (!state.fixedSkips) state.fixedSkips = {};
+      state.fixedSkips[fc.id] = (state.fixedSkips[fc.id] || []).filter(x => x !== mk);
+      if ((state.fixedSkips[fc.id] || []).length === 0) delete state.fixedSkips[fc.id];
+      save(); render();
+    };
+  } else {
+    skipBtn.textContent = "この月はスキップ";
+    skipBtn.className = "sheet-btn sheet-btn-danger";
+    skipBtn.onclick = () => {
+      hideLedgerFxSheet();
+      if (!state.fixedSkips) state.fixedSkips = {};
+      if (!state.fixedSkips[fc.id]) state.fixedSkips[fc.id] = [];
+      if (!state.fixedSkips[fc.id].includes(mk)) state.fixedSkips[fc.id].push(mk);
+      save(); render();
+    };
+  }
+  $("#ledgerFxSheet").onclick = ev => { if (ev.target === ev.currentTarget) hideLedgerFxSheet(); };
+  $("#ledgerFxSheet").classList.remove("hidden");
+}
+function hideLedgerFxSheet() { $("#ledgerFxSheet").classList.add("hidden"); }
 
 // ---------- action sheet (ledger) ----------
 function showSheet(entry) {
@@ -654,7 +753,11 @@ function startEdit(entry) {
 }
 
 // ---------- edit cancel ----------
-$("#aCancelEdit").onclick  = () => switchTab("ledger");
+$("#aCancelEdit").onclick = () => {
+  const id = editingId;
+  switchTab("ledger");
+  if (id) scrollAndHighlight(id);
+};
 $("#fxCancelEdit").onclick = () => switchTab("fixed");
 
 // ---------- add entry ----------
@@ -664,6 +767,7 @@ $("#aSubmit").onclick = () => {
   const amt  = Number($("#aAmt").value.replace(/[,，]/g, ""));
   const date = $("#aDate").value;
   if (!amt || !date) return; // カテゴリは常に選択済み
+  const savedEditId = editingId; // スクロール用に先に保存
   if (editingId) {
     const idx = state.entries.findIndex(e => e.id === editingId);
     if (idx !== -1) {
@@ -679,6 +783,7 @@ $("#aSubmit").onclick = () => {
   $("#aName").value = ""; $("#aAmt").value = "";
   save(); render();
   switchTab("ledger");
+  if (savedEditId) scrollAndHighlight(savedEditId);
 };
 
 // ---------- add fixed ----------
@@ -736,8 +841,9 @@ $("#importFile").onchange = (ev) => {
     try {
       const d = JSON.parse(r.result);
       if (!Array.isArray(d.entries)) throw new Error();
-      state = Object.assign({ startBalance:0, entries:[], fixed:[], monthsAhead:3, includeProvisional:true, categories:[...DEFAULT_CATS] }, d);
+      state = Object.assign({ startBalance:0, entries:[], fixed:[], fixedSkips:{}, monthsAhead:3, includeProvisional:true, categories:[...DEFAULT_CATS] }, d);
       if (!Array.isArray(state.categories) || state.categories.length === 0) state.categories = [...DEFAULT_CATS];
+      if (!state.fixedSkips || typeof state.fixedSkips !== "object" || Array.isArray(state.fixedSkips)) state.fixedSkips = {};
       state.entries = migrateArr(state.entries);
       state.fixed   = migrateArr(state.fixed);
       $("#sBal").value = state.startBalance;
@@ -752,7 +858,7 @@ $("#importFile").onchange = (ev) => {
 };
 $("#btnClear").onclick = () => {
   if (confirm("すべての記帳データを削除しますか?")) {
-    state = { startBalance: 0, entries: [], fixed: [], monthsAhead: 3, includeProvisional: state.includeProvisional, categories: state.categories };
+    state = { startBalance: 0, entries: [], fixed: [], fixedSkips: {}, monthsAhead: 3, includeProvisional: state.includeProvisional, categories: state.categories };
     $("#sBal").value = 0;
     save(); render();
   }

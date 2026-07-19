@@ -45,7 +45,10 @@
   .month-head{display:flex;justify-content:space-between;align-items:center;
       padding-bottom:8px;border-bottom:2px solid var(--ink);font-size:14px;cursor:pointer;user-select:none}
   .month-head:active{opacity:.7}
-  .collapse-btn{font-size:12px;color:var(--mut);background:none;border:none;padding:0 2px;cursor:pointer;flex-shrink:0;line-height:1}
+  .collapse-btn{color:var(--mut);background:none;border:none;padding:0;cursor:pointer;flex-shrink:0;line-height:0}
+  /* シェブロンSVG */
+  .chev{display:inline-block;vertical-align:middle;flex-shrink:0;transition:transform .18s ease}
+  .chev-up{transform:rotate(180deg)}
   .month-head b{font-weight:700}
   .now-badge{margin-left:8px;font-size:10px;font-weight:700;color:#fff;background:var(--ink);
       border-radius:4px;padding:2px 6px;vertical-align:middle}
@@ -84,7 +87,7 @@
   .io-row{display:flex;gap:8px}
   .io-row button{flex:1;padding:10px 0;border-radius:8px;border:1px solid var(--line);background:#fff;
       font-size:13px;cursor:pointer;color:#5A5F68}
-  @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}.chev{transition:none}}
   /* Action sheet */
   .sheet-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:flex-end;justify-content:center}
   .sheet-overlay.hidden{display:none}
@@ -174,9 +177,9 @@
     </div>
     <div id="filterPanel" class="hidden">
       <div class="filter-dd-bar">
-        <button id="fBtnProv" class="filter-dd-btn">すべて▽</button>
-        <button id="fBtnMonth" class="filter-dd-btn">月▽</button>
-        <button id="fBtnCat" class="filter-dd-btn">カテゴリ▽</button>
+        <button id="fBtnProv" class="filter-dd-btn">すべて</button>
+        <button id="fBtnMonth" class="filter-dd-btn">月</button>
+        <button id="fBtnCat" class="filter-dd-btn">カテゴリ</button>
       </div>
       <div id="filterDropdown" class="filter-dropdown hidden"></div>
     </div>
@@ -308,6 +311,8 @@ const pad = (n) => String(n).padStart(2, "0");
 const yen = (n) => "¥" + Math.abs(Math.round(n)).toLocaleString("ja-JP");
 const uid = () => Math.random().toString(36).slice(2, 10);
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+// 線のみのシェブロンSVG (up=true → ⌃, up=false → ⌄)
+const chev = (up) => `<svg class="chev${up?' chev-up':''}" viewBox="0 0 10 6" width="10" height="6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1,1 5,5 9,1"/></svg>`;
 const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
@@ -413,42 +418,41 @@ function updateFilterBtn() {
 
 // 3つのDDボタンラベルと状態を更新
 function updateDDBtns() {
-  // prov button
+  const isOpen = (t) => activeDDBtn === t;
   const pb = $("#fBtnProv");
   if (pb) {
     const label = filterProv === "all" ? "すべて" : filterProv === "confirmed" ? "確定" : "仮";
-    pb.textContent = label + "▽";
+    pb.innerHTML = `${label} ${chev(isOpen("prov"))}`;
     pb.classList.toggle("has-filter", filterProv !== "all");
-    pb.classList.toggle("dd-open", activeDDBtn === "prov");
+    pb.classList.toggle("dd-open", isOpen("prov"));
   }
-  // month button
   const mb = $("#fBtnMonth");
   if (mb) {
+    let label;
     if (filterMonth) {
       const [y, m] = filterMonth.split("-");
       const nowY = String(new Date().getFullYear());
-      mb.textContent = (y === nowY ? `${Number(m)}月` : `${y}/${Number(m)}月`) + "▽";
+      label = y === nowY ? `${Number(m)}月` : `${y}/${Number(m)}月`;
       mb.classList.add("has-filter");
     } else {
-      mb.textContent = "月▽";
+      label = "月";
       mb.classList.remove("has-filter");
     }
-    mb.classList.toggle("dd-open", activeDDBtn === "month");
+    mb.innerHTML = `${label} ${chev(isOpen("month"))}`;
+    mb.classList.toggle("dd-open", isOpen("month"));
   }
-  // cat button
   const cb = $("#fBtnCat");
   if (cb) {
+    let label;
     if (filterCats.length === 0) {
-      cb.textContent = "カテゴリ▽";
-      cb.classList.remove("has-filter");
+      label = "カテゴリ"; cb.classList.remove("has-filter");
     } else if (filterCats.length === 1) {
-      cb.textContent = filterCats[0] + "▽";
-      cb.classList.add("has-filter");
+      label = esc(filterCats[0]); cb.classList.add("has-filter");
     } else {
-      cb.textContent = filterCats[0] + "+" + (filterCats.length - 1) + "▽";
-      cb.classList.add("has-filter");
+      label = `${esc(filterCats[0])}+${filterCats.length - 1}`; cb.classList.add("has-filter");
     }
-    cb.classList.toggle("dd-open", activeDDBtn === "cat");
+    cb.innerHTML = `${label} ${chev(isOpen("cat"))}`;
+    cb.classList.toggle("dd-open", isOpen("cat"));
   }
 }
 
@@ -613,12 +617,11 @@ function render() {
     const pTotal = (g?.provInSum||0) + (g?.provOutSum||0);
     const provHint = pTotal > 0 ? `<span class="prov-hint">(うち仮 ${yen(pTotal)})</span>` : "";
     const isCollapsed = collapsedMonths.has(mk);
-    const colIcon = isCollapsed ? "▽" : "△";
     html += `<section class="month"><div class="month-head" data-mkcol="${mk}">
       <b>${y}年${Number(m)}月${mk === nowMk ? '<span class="now-badge">今月</span>' : ""}</b>
       <span style="display:flex;align-items:center;gap:10px">
         <span class="sums"><span class="i">入 ${yen(g?.inSum||0)}</span><span class="o">出 ${yen(g?.outSum||0)}</span>${provHint}</span>
-        <button class="collapse-btn" data-mkcol="${mk}" aria-label="折りたたみ切替">${colIcon}</button>
+        <button class="collapse-btn" data-mkcol="${mk}" aria-label="折りたたみ切替">${chev(!isCollapsed)}</button>
       </span>
     </div>`;
     if (!isCollapsed) {

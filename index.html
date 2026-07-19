@@ -42,8 +42,10 @@
   nav button.active{background:var(--ink);color:#fff;border-color:var(--ink);font-weight:700}
   main{padding-bottom:20px}
   .month{padding:14px 20px 4px}
-  .month-head{display:flex;justify-content:space-between;align-items:baseline;
-      padding-bottom:8px;border-bottom:2px solid var(--ink);font-size:14px}
+  .month-head{display:flex;justify-content:space-between;align-items:center;
+      padding-bottom:8px;border-bottom:2px solid var(--ink);font-size:14px;cursor:pointer;user-select:none}
+  .month-head:active{opacity:.7}
+  .collapse-btn{font-size:12px;color:var(--mut);background:none;border:none;padding:0 2px;cursor:pointer;flex-shrink:0;line-height:1}
   .month-head b{font-weight:700}
   .now-badge{margin-left:8px;font-size:10px;font-weight:700;color:#fff;background:var(--ink);
       border-radius:4px;padding:2px 6px;vertical-align:middle}
@@ -308,6 +310,22 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
 const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// ---------- 月折りたたみ状態 (localStorage, バックアップ対象外) ----------
+const COLLAPSE_KEY = "cashflow-collapsed";
+let collapsedMonths = new Set();
+function loadCollapsed() {
+  try { const r = localStorage.getItem(COLLAPSE_KEY); if (r) collapsedMonths = new Set(JSON.parse(r)); } catch {}
+}
+function saveCollapsed() {
+  localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...collapsedMonths]));
+}
+function toggleCollapse(mk) {
+  if (collapsedMonths.has(mk)) collapsedMonths.delete(mk);
+  else collapsedMonths.add(mk);
+  saveCollapsed();
+  render();
+}
 
 // ---------- state ----------
 const DEFAULT_CATS = ["旅行","食費","固定費","カード","収入","その他"];
@@ -594,10 +612,16 @@ function render() {
     if (isFiltered && visRows.length === 0) continue;
     const pTotal = (g?.provInSum||0) + (g?.provOutSum||0);
     const provHint = pTotal > 0 ? `<span class="prov-hint">(うち仮 ${yen(pTotal)})</span>` : "";
-    html += `<section class="month"><div class="month-head">
+    const isCollapsed = collapsedMonths.has(mk);
+    const colIcon = isCollapsed ? "▽" : "△";
+    html += `<section class="month"><div class="month-head" data-mkcol="${mk}">
       <b>${y}年${Number(m)}月${mk === nowMk ? '<span class="now-badge">今月</span>' : ""}</b>
-      <span class="sums"><span class="i">入 ${yen(g?.inSum||0)}</span><span class="o">出 ${yen(g?.outSum||0)}</span>${provHint}</span>
+      <span style="display:flex;align-items:center;gap:10px">
+        <span class="sums"><span class="i">入 ${yen(g?.inSum||0)}</span><span class="o">出 ${yen(g?.outSum||0)}</span>${provHint}</span>
+        <button class="collapse-btn" data-mkcol="${mk}" aria-label="折りたたみ切替">${colIcon}</button>
+      </span>
     </div>`;
+    if (!isCollapsed) {
     if (!visRows.length) html += `<div class="empty">記帳なし</div>`;
     else for (const r of visRows) {
       const rc = [r.date < today?"past":"", r.provisional?"prov":"", r.provisional&&!r.counted?"prov-off":"", r.skipped?"skipped":""].filter(Boolean).join(" ");
@@ -613,9 +637,17 @@ function render() {
           ${balHtml}</div>
       </div>`;
     }
+    } // end !isCollapsed
     html += `</section>`;
   }
   $("#ledger").innerHTML = html;
+  // 月ヘッダー折りたたみ
+  $$("#ledger .month-head").forEach(head => head.onclick = (ev) => {
+    // collapseボタン自体のクリックも同様に処理(バブリング)
+    toggleCollapse(head.dataset.mkcol);
+  });
+  // 折りたたみボタンのバブリング抑止(ヘッダーと二重実行しないため同一関数で処理済み)
+
   $$("#ledger .row[data-eid]").forEach(row => row.onclick = () => {
     const entry = state.entries.find(e => e.id === row.dataset.eid);
     if (entry) showSheet(entry);
@@ -925,6 +957,7 @@ $("#btnClear").onclick = () => {
 
 // ---------- init ----------
 load();
+loadCollapsed();
 $("#sBal").value = state.startBalance;
 $("#sAhead").value = state.monthsAhead;
 $("#toggleProv").checked = state.includeProvisional;

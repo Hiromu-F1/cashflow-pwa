@@ -41,10 +41,16 @@
       background:#fff;color:#5A5F68;cursor:pointer}
   nav button.active{background:var(--ink);color:#fff;border-color:var(--ink);font-weight:700}
   main{padding-bottom:20px}
-  .month{padding:14px 20px 4px}
+  /* 年見出し区切り */
+  .year-divider{padding:16px 20px 2px;display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:var(--mut);letter-spacing:.1em}
+  .year-divider::after{content:"";flex:1;height:1px;background:var(--line)}
+  .month{padding:6px 20px 4px}
   .month-head{display:flex;justify-content:space-between;align-items:center;
       padding-bottom:8px;border-bottom:2px solid var(--ink);font-size:14px;cursor:pointer;user-select:none}
   .month-head:active{opacity:.7}
+  .month-head-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+  .month-head-sums{display:flex;align-items:center;gap:8px}
+  .prov-hint-sm{font-size:10px;color:#B45309}
   .collapse-btn{color:var(--mut);background:none;border:none;padding:0;cursor:pointer;flex-shrink:0;line-height:0}
   /* シェブロンSVG */
   .chev{display:inline-block;vertical-align:middle;flex-shrink:0;transition:transform .18s ease}
@@ -109,7 +115,6 @@
   .row.prov-off{opacity:.45}
   .prov-badge{margin-left:6px;font-size:10px;color:#92400E;background:#FEF3C7;border-radius:4px;padding:1px 5px}
   .type-switch button.sel-prov{background:#D97706;border-color:#D97706;color:#fff;font-weight:700}
-  .prov-hint{font-size:11px;color:#B45309;margin-left:8px}
   /* Category chips */
   .chip-row{display:flex;flex-wrap:wrap;gap:6px}
   .chip{padding:5px 12px;border-radius:20px;border:1px solid var(--line);background:#fff;font-size:13px;cursor:pointer;color:#5A5F68;white-space:nowrap;line-height:1.4}
@@ -639,21 +644,26 @@ function render() {
 
   // ledger
   let html = "";
+  let prevYear = null;
   for (const mk of L.months) {
     const g = L.byMonth.get(mk);
     const [y, m] = mk.split("-");
     const allRows = g?.rows || [];
     const visRows = isFiltered ? allRows.filter(rowMatchesFilter) : allRows;
     if (isFiltered && visRows.length === 0) continue;
+    // 年見出し(年が変わるときだけ挿入)
+    if (y !== prevYear) { html += `<div class="year-divider">${y}</div>`; prevYear = y; }
     const pTotal = (g?.provInSum||0) + (g?.provOutSum||0);
-    const provHint = pTotal > 0 ? `<span class="prov-hint">(うち仮 ${yen(pTotal)})</span>` : "";
     const isCollapsed = collapsedMonths.has(mk);
     html += `<section class="month"><div class="month-head" data-mkcol="${mk}">
-      <b>${y}年${Number(m)}月${mk === nowMk ? '<span class="now-badge">今月</span>' : ""}</b>
-      <span style="display:flex;align-items:center;gap:10px">
-        <span class="sums"><span class="i">入 ${yen(g?.inSum||0)}</span><span class="o">出 ${yen(g?.outSum||0)}</span>${provHint}</span>
-        <button class="collapse-btn" data-mkcol="${mk}" aria-label="折りたたみ切替">${chev(!isCollapsed)}</button>
-      </span>
+      <b>${Number(m)}月${mk === nowMk ? '<span class="now-badge">今月</span>' : ""}</b>
+      <div class="month-head-right">
+        <div class="month-head-sums">
+          <span class="sums"><span class="i">入 ${yen(g?.inSum||0)}</span><span class="o">出 ${yen(g?.outSum||0)}</span></span>
+          <button class="collapse-btn" data-mkcol="${mk}" aria-label="折りたたみ切替">${chev(!isCollapsed)}</button>
+        </div>
+        ${pTotal > 0 ? `<div class="prov-hint-sm">うち仮 ${yen(pTotal)}</div>` : ""}
+      </div>
     </div>`;
     if (!isCollapsed) {
     if (!visRows.length) html += `<div class="empty">記帳なし</div>`;
